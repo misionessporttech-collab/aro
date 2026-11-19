@@ -458,7 +458,7 @@ function sortedRosterJs(g, st) {
    Persistencia: nube (db privada por usuario) + copia local
    ============================================================ */
 /* Configuración de la nube propia (Supabase). Vacío = usa el guardado de Claude o el navegador. */
-const CONFIG = { supabaseUrl: "", supabaseAnonKey: "" };
+const CONFIG = { supabaseUrl: "https://djdfbpjlvdmqtjeyondh.supabase.co", supabaseAnonKey: "sb_publishable_V_Sr_9fwDLGjPhdZUDJYtg_zqG--0bP" };
 const SB = { c: null, user: null };
 const SHARED_ID = (() => { try { return new URLSearchParams(location.search).get("partido"); } catch { return null; } })();
 const LS_KEY = "aro.games.v1", LS_CUR = "aro.current";
