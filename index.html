@@ -1,0 +1,1735 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aro · Análisis de básquet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f3f0e8; --panel:#fffdf8; --ink:#1b1c1e; --muted:#6c6a64; --line:#e2ddd1; --line2:#d3ccbc;
+  --accent:#e8641b; --accent-ink:#fff; --ok:#1f8a4c; --bad:#c43c2c; --blue:#2463c9;
+  --wood:#c9894a; --wood2:#bf7f42; --court-line:#fff7ea;
+  --us:#e8641b; --opp:#4a5568;
+  --r:10px; --shadow:0 1px 0 rgba(0,0,0,.04),0 6px 18px -10px rgba(0,0,0,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Barlow,system-ui,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{font-family:"Barlow Condensed",Barlow,sans-serif;letter-spacing:.01em;margin:0}
+.num{font-family:"Barlow Condensed",Barlow,sans-serif;font-variant-numeric:tabular-nums}
+a{color:var(--blue)}
+.hidden{display:none!important}
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:#17181a;color:#f5f1e8;display:flex;align-items:center;gap:18px;padding:0 18px;height:52px}
+.brand{display:flex;align-items:center;gap:9px;font:700 20px "Barlow Condensed",Barlow,sans-serif;letter-spacing:.08em;text-transform:uppercase;cursor:pointer}
+.brand i{width:22px;height:22px;border-radius:50%;border:3px solid var(--accent);display:inline-block;position:relative}
+.brand i:after{content:"";position:absolute;left:-3px;right:-3px;top:7px;height:3px;background:var(--accent)}
+.nav{display:flex;gap:4px}
+.nav button{background:none;border:0;color:#bdb8ad;padding:8px 12px;border-radius:7px;cursor:pointer;font-weight:600}
+.nav button.on{color:#fff;background:#2a2c2f}
+.nav button:disabled{opacity:.35;cursor:default}
+.top .sp{flex:1}
+.save-state{font-size:12.5px;color:#a9a497;display:flex;align-items:center;gap:6px}
+.save-state b{width:8px;height:8px;border-radius:50%;background:#777;display:inline-block}
+.save-state.ok b{background:#3fbf6f}.save-state.busy b{background:#e5b33a}.save-state.err b{background:#e0533f}
+main{max-width:1320px;margin:0 auto;padding:22px 18px 80px}
+/* generic */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.pad{padding:18px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;gap:16px}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:#fff;border-radius:8px;padding:8px 13px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:hover{border-color:#b9b19f}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(.95)}
+.btn.dark{background:#1b1c1e;border-color:#1b1c1e;color:#fff}
+.btn.ghost{background:transparent;border-color:transparent}
+.btn.sm{padding:5px 9px;font-size:13px;border-radius:7px}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+label.f input,label.f select,label.f textarea,.inp{border:1px solid var(--line2);border-radius:8px;padding:8px 10px;background:#fff;font-size:15px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:500}
+textarea{resize:vertical}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.eyebrow{font:600 12px Barlow,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.pill{display:inline-block;font:700 11px Barlow,sans-serif;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:5px}
+.pill.w{background:#d9f0e1;color:#1d6b3e}.pill.l{background:#f7dcd7;color:#9b2c1f}.pill.d{background:#ece8dd;color:#555}
+.chip{border:1px solid var(--line2);background:#fff;border-radius:7px;padding:5px 9px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.chip b{font-family:"Barlow Condensed",Barlow,sans-serif;font-size:15px}
+.chip.on{background:#1b1c1e;color:#fff;border-color:#1b1c1e}
+.chip.zero{opacity:.45}
+.toast-box{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:#1b1c1e;color:#fff;padding:9px 15px;border-radius:9px;font-weight:600;box-shadow:0 8px 24px -8px rgba(0,0,0,.4);animation:tin .18s ease-out}
+.toast.warn{background:#9b5a0c}.toast.err{background:#a2281b}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}}
+.modal-bg{position:fixed;inset:0;background:rgba(20,20,20,.45);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--panel);border-radius:12px;max-width:560px;width:100%;padding:22px;box-shadow:0 20px 60px -20px rgba(0,0,0,.5);max-height:90vh;overflow:auto}
+.modal h3{font-size:22px;margin-bottom:8px}
+/* home */
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;margin-bottom:22px}
+.hero h1{font-size:40px;line-height:1;margin:6px 0 10px}
+.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.gcard{padding:16px;display:flex;flex-direction:column;gap:12px}
+.gcard .sc{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.gcard .sc .num{font-size:34px;font-weight:700}
+.tname{font-weight:700;font-size:16px;line-height:1.15}
+.badge{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:700 15px "Barlow Condensed",Barlow,sans-serif;border:2px solid rgba(0,0,0,.12);flex:none}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+/* tagger */
+.tag-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(360px,1fr);gap:14px;align-items:start}
+.vbox{background:#0f0f10;border-radius:var(--r);overflow:hidden;position:relative;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+.vbox video{width:100%;height:100%;display:block;background:#000}
+.vdrop{position:absolute;inset:0;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;color:#d8d3c7;text-align:center;padding:20px;border:2px dashed #3a3a3c;border-radius:var(--r)}
+.vdrop .btn:not(.pri){color:var(--ink)}
+a.btn{text-decoration:none}
+.vdrop.over{border-color:var(--accent);background:rgba(232,100,27,.08)}
+.vbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+.vbar .time{font:600 17px "Barlow Condensed",Barlow,sans-serif;min-width:120px}
+.scrub{flex:1;min-width:160px;accent-color:var(--accent)}
+.status{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 14px}
+.jbig{font:700 42px/1 "Barlow Condensed",Barlow,sans-serif;min-width:86px;text-align:center;background:#1b1c1e;color:#fff;border-radius:9px;padding:6px 8px}
+.jbig small{display:block;font:600 10px Barlow,sans-serif;letter-spacing:.1em;color:#aaa;text-transform:uppercase;margin-bottom:2px}
+.live{font:700 30px/1 "Barlow Condensed",Barlow,sans-serif;text-align:right}
+.live small{display:block;font:600 11px Barlow,sans-serif;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.court-wrap{position:relative}
+.court{width:100%;display:block;border-radius:8px;cursor:crosshair;user-select:none}
+.court-msg{position:absolute;left:8px;top:8px;background:rgba(20,20,20,.82);color:#fff;font-weight:600;font-size:13px;padding:5px 9px;border-radius:7px;pointer-events:none}
+.legend{display:grid;grid-template-columns:repeat(2,1fr);gap:3px 14px;font-size:13px}
+.legend div{display:flex;gap:8px;align-items:center}
+kbd{display:inline-block;min-width:22px;text-align:center;font:700 12px/1 ui-monospace,Menlo,monospace;background:#fff;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;padding:4px 5px}
+.evlist{max-height:420px;overflow:auto;border-top:1px solid var(--line)}
+.ev{display:grid;grid-template-columns:62px 38px 50px 1fr auto;gap:8px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:14px}
+.ev:hover{background:#f7f3ea}
+.ev.sel{background:#fff1e6;box-shadow:inset 3px 0 0 var(--accent)}
+.ev .t{font:600 14px "Barlow Condensed",Barlow,sans-serif;color:var(--muted)}
+.ev .noloc{color:#b15d10;font-size:12px;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 10px}
+.tabs button{background:none;border:0;padding:10px 10px;font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.tabs button.on{color:var(--ink);border-color:var(--accent)}
+.marks{display:flex;gap:6px;flex-wrap:wrap}
+.mark{background:#efe9dc;border-radius:6px;padding:3px 4px 3px 8px;font-size:13px;font-weight:600;display:inline-flex;gap:4px;align-items:center}
+.mark button{border:0;background:none;cursor:pointer;color:var(--muted);padding:0 4px;font-size:14px}
+.edit{padding:14px;display:grid;gap:10px}
+.edit .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:6px 11px;cursor:pointer;font-weight:600;font-size:13px;border-right:1px solid var(--line2)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:#1b1c1e;color:#fff}
+/* game view */
+.ghead{overflow:hidden}
+.ghead .top-part{padding:20px 24px 18px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;background:linear-gradient(180deg,#fffdf8 0%,#f6efe0 100%)}
+.ghead .team{display:flex;align-items:center;gap:12px}
+.ghead .team.r{justify-content:flex-end;text-align:right}
+.ghead .badge{width:54px;height:54px;font-size:21px;border-radius:10px}
+.bigscore{font:700 66px/1 "Barlow Condensed",Barlow,sans-serif;display:flex;gap:16px;align-items:center}
+.bigscore .lo{color:#a7a294}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--line)}
+.kpi{padding:12px 16px;border-right:1px solid var(--line)}
+.kpi:last-child{border-right:0}
+.kpi .v{font:700 28px/1.05 "Barlow Condensed",Barlow,sans-serif}
+.kpi .s{font-size:12px;color:var(--muted)}
+.sec-title{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 10px}
+.sec-title h2{font-size:24px}
+.fv{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.9fr);gap:0}
+.fv-left{padding:16px;border-right:1px solid var(--line)}
+.fv-right{padding:16px;display:flex;flex-direction:column;gap:12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.clips{max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.clip{display:grid;grid-template-columns:54px 34px 46px 1fr auto;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer;align-items:center}
+.clip:hover{background:#f7f3ea}
+.clip.now{background:#fff1e6}
+table.box{width:100%;border-collapse:collapse;font-size:14px}
+table.box th{font:700 11.5px Barlow,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:right;padding:9px 8px;border-bottom:1px solid var(--line2);white-space:nowrap;background:#faf7f0}
+table.box th:first-child,table.box td:first-child{text-align:left}
+table.box td{padding:8px;border-bottom:1px solid var(--line);text-align:right;font-family:"Barlow Condensed",Barlow,sans-serif;font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.box td:first-child{font-family:Barlow;font-size:14.5px;font-weight:600}
+table.box tr.pl{cursor:pointer}
+table.box tr.pl:hover td{background:#f7f3ea}
+table.box tr.on td{background:#fff1e6}
+table.box tr.tot td{font-weight:700;background:#f3eee2}
+.scroll-x{overflow-x:auto}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.bars .b{display:grid;grid-template-columns:24px 120px 1fr 40px;gap:10px;align-items:center;padding:5px 0;cursor:pointer;font-size:14px}
+.bars .b:hover{background:#f7f3ea}
+.bars .track{height:14px;border-radius:4px;background:#efe9dc;display:flex;overflow:hidden}
+.zones td,.zones th{padding:6px 8px}
+.ai-out{white-space:pre-wrap}
+.ai-out h3{font-size:22px;margin-bottom:6px}
+.ai-out ul{margin:6px 0 0;padding-left:20px}
+.chat{display:flex;flex-direction:column;gap:10px;max-height:460px;overflow:auto;padding:4px}
+.msg{padding:10px 13px;border-radius:10px;max-width:88%;white-space:pre-wrap;font-size:14.5px}
+.msg.u{align-self:flex-end;background:#1b1c1e;color:#fff}
+.msg.a{align-self:flex-start;background:#f3eee2}
+.msg .cl{border:0;background:var(--accent);color:#fff;border-radius:5px;padding:1px 6px;font-size:12px;font-weight:700;cursor:pointer;margin:0 2px}
+.hl{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.hl button{text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 11px;cursor:pointer}
+.hl button:hover{border-color:var(--accent)}
+.hl b{display:block;font-size:14px}
+#ytWrap{position:absolute;z-index:5;display:none;background:#000;border-radius:var(--r);overflow:hidden}
+#ytWrap iframe{width:100%;height:100%;display:block;border:0}
+.yt-shield{position:absolute;inset:0;cursor:pointer}
+.clip .yt-a{font-size:12px;font-weight:700;text-decoration:none;color:#c4302b;padding:0 4px}
+.tip{position:absolute;pointer-events:none;background:#1b1c1e;color:#fff;font-size:12.5px;padding:5px 8px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-120%)}
+@media (max-width:640px){.save-state span{display:none}.top{gap:10px;padding:0 10px}.nav button{padding:8px 8px}.ghead .top-part{grid-template-columns:1fr;text-align:center}.ghead .team,.ghead .team.r{justify-content:center;text-align:center}.kpis{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:980px){
+  .hero,.tag-grid,.fv,.two-col{grid-template-columns:1fr}
+  .fv-left{border-right:0;border-bottom:1px solid var(--line)}
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .bigscore{font-size:46px}
+  .ghead .top-part{padding:16px}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand" data-go="inicio"><i></i>Aro</div>
+  <nav class="nav">
+    <button data-go="inicio">Partidos</button>
+    <button data-go="etiquetar">Etiquetar</button>
+    <button data-go="analisis">Análisis</button>
+  </nav>
+  <div class="sp"></div>
+  <div class="save-state" id="saveState"><b></b><span>Iniciando…</span></div>
+  <div class="row" id="authBox" style="gap:6px;flex-wrap:nowrap"></div>
+</header>
+<main id="app"></main>
+<div class="toast-box" id="toasts"></div>
+<input type="file" id="videoInput" accept="video/*" class="hidden">
+<input type="file" id="jsonInput" accept=".json,application/json" class="hidden">
+
+<script>
+"use strict";
+/* ============================================================
+   Utilidades
+   ============================================================ */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const r2 = v => Math.round(v * 100) / 100;
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+function fmtT(s) {
+  if (s == null || isNaN(s)) return "--:--";
+  s = Math.max(0, s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = Math.floor(s % 60);
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(ss).padStart(2, "0");
+}
+function toast(msg, kind = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind; el.textContent = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), kind ? 3800 : 2200);
+}
+function modal(html, onMount) {
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal">${html}</div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.addEventListener("mousedown", e => { if (e.target === bg) close(); });
+  onMount && onMount(bg.firstElementChild, close);
+  return close;
+}
+function confirmBox(text, okLabel = "Confirmar", danger = true) {
+  return new Promise(res => {
+    modal(`<h3>¿Seguro?</h3><p>${esc(text)}</p><div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn" data-x>Cancelar</button><button class="btn ${danger ? "dark" : "pri"}" data-ok>${esc(okLabel)}</button></div>`,
+      (m, close) => {
+        m.querySelector("[data-x]").onclick = () => { close(); res(false); };
+        m.querySelector("[data-ok]").onclick = () => { close(); res(true); };
+      });
+  });
+}
+function contrastInk(hex) {
+  const c = (hex || "#888").replace("#", "");
+  const n = parseInt(c.length === 3 ? c.split("").map(x => x + x).join("") : c, 16);
+  const r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#1b1c1e" : "#fff";
+}
+const initials = n => (n || "?").split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
+
+/* ============================================================
+   Cancha (FIBA 28 x 15 m). Coordenadas guardadas en 0-100.
+   Normalizadas: nuestro equipo SIEMPRE ataca hacia la derecha.
+   ============================================================ */
+const CW = 28, CH = 15, RIM_X = 28 - 1.575, RIM_Y = 7.5;
+const toM = (x, y) => [x / 100 * CW, y / 100 * CH];
+const toP = (mx, my) => [mx / CW * 100, my / CH * 100];
+function distRim(x, y) { const [mx, my] = toM(x, y); return Math.hypot(mx - RIM_X, my - RIM_Y); }
+function isThreeLoc(x, y) {
+  const [mx, my] = toM(x, y);
+  if (mx > CW - 2.99) return my < 0.9 || my > CH - 0.9;
+  return Math.hypot(mx - RIM_X, my - RIM_Y) > 6.75;
+}
+function zoneOf(x, y) {
+  const [mx, my] = toM(x, y);
+  if (mx < CW / 2) return "back";
+  if (isThreeLoc(x, y)) {
+    if (mx > CW - 2.99 - 0.6) return my < RIM_Y ? "c3izq" : "c3der";
+    return "t3";
+  }
+  if (mx >= CW - 5.8 && Math.abs(my - RIM_Y) <= 2.45) return "pintura";
+  return "media";
+}
+const ZONES = { pintura: "Pintura", media: "Media distancia", c3izq: "Triple esquina (sup.)", c3der: "Triple esquina (inf.)", t3: "Triple frontal / 45°", back: "Campo propio" };
+
+function courtSVG({ id = "", cls = "court", half = false, inner = "", defs = "" } = {}) {
+  const side = `
+    <rect x="0" y="5.05" width="5.8" height="4.9" fill="rgba(0,0,0,.07)" stroke="var(--court-line)" stroke-width=".06"/>
+    <circle cx="5.8" cy="7.5" r="1.8" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
+    <path d="M1.575 6.25 A1.25 1.25 0 0 1 1.575 8.75" fill="none" stroke="var(--court-line)" stroke-width=".05"/>
+    <path d="M0 0.9 H2.99 A6.75 6.75 0 0 1 2.99 14.1 H0" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
+    <line x1="1.2" y1="6.6" x2="1.2" y2="8.4" stroke="var(--court-line)" stroke-width=".1"/>
+    <circle cx="1.575" cy="7.5" r=".25" fill="none" stroke="#f26a1b" stroke-width=".08"/>`;
+  const vb = half ? "13.4 -0.3 14.9 15.6" : "-0.3 -0.3 28.6 15.6";
+  return `<svg ${id ? `id="${id}"` : ""} class="${cls}" viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="wood" width="1.4" height="15" patternUnits="userSpaceOnUse"><rect width="1.4" height="15" fill="var(--wood)"/><rect width=".7" height="15" fill="var(--wood2)"/></pattern>
+      <marker id="arr-ok" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1d6b3e"/></marker>
+      <marker id="arr-bad" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5b6475"/></marker>
+      ${defs}
+    </defs>
+    <rect x="-0.3" y="-0.3" width="28.6" height="15.6" rx=".4" fill="#6b4a2b"/>
+    <rect x="0" y="0" width="28" height="15" fill="url(#wood)" stroke="var(--court-line)" stroke-width=".08"/>
+    <line x1="14" y1="0" x2="14" y2="15" stroke="var(--court-line)" stroke-width=".06"/>
+    <circle cx="14" cy="7.5" r="1.8" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
+    <g>${side}</g>
+    <g transform="translate(28,0) scale(-1,1)">${side}</g>
+    <g class="layer">${inner}</g>
+  </svg>`;
+}
+function svgPoint(svg, ev) {
+  const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return toP(clamp(p.x, 0, CW), clamp(p.y, 0, CH));
+}
+
+/* ============================================================
+   Modelo de datos
+   evento: {id, t, type, team:'us'|'opp', j, x, y, d:{...}, hl}
+   ============================================================ */
+const TYPE_LABEL = { fg: "Tiro", ft: "Libre", reb: "Rebote", to: "Pérdida", stl: "Robo", blk: "Tapa", foul: "Falta", pass: "Pase", opp: "Rival" };
+const TYPE_COLOR = { fg: "#e8641b", ft: "#e8a31b", reb: "#2463c9", to: "#c43c2c", stl: "#1f8a4c", blk: "#7b3fc4", foul: "#7a6f5d", pass: "#8aa1c4", opp: "#4a5568" };
+const CLIP = { fg: [6, 2], ft: [3, 2], reb: [4, 2], to: [5, 2], stl: [5, 2], blk: [5, 2], foul: [4, 2], pass: [3, 1.5], opp: [6, 2] };
+const KEYS = {
+  a: { type: "fg", d: { pts: 2, made: true } }, z: { type: "fg", d: { pts: 2, made: false } },
+  s: { type: "fg", d: { pts: 3, made: true } }, x: { type: "fg", d: { pts: 3, made: false } },
+  d: { type: "ft", d: { made: true } }, c: { type: "ft", d: { made: false } },
+  r: { type: "reb", d: { off: false } }, e: { type: "reb", d: { off: true } },
+  p: { type: "to", d: { kind: "perdida" } }, b: { type: "stl", d: {} }, g: { type: "blk", d: {} },
+  f: { type: "foul", d: { kind: "personal" } }, k: { type: "pass", d: { ok: true } }, l: { type: "pass", d: { ok: false } },
+  u: { type: "opp", d: { pts: 1 } }, o: { type: "opp", d: { pts: 2 } }, i: { type: "opp", d: { pts: 3 } }
+};
+const LEGEND = [
+  ["A", "Doble convertido"], ["Z", "Doble errado"], ["S", "Triple convertido"], ["X", "Triple errado"],
+  ["D", "Libre convertido"], ["C", "Libre errado"], ["R", "Rebote defensivo"], ["E", "Rebote ofensivo"],
+  ["V", "Asistencia → último tiro"], ["N", "And-one → último tiro"], ["P", "Pérdida"], ["B", "Robo"],
+  ["G", "Tapa"], ["F", "Falta"], ["K", "Pase completo"], ["L", "Pase errado"],
+  ["O", "Rival +2"], ["I", "Rival +3"], ["U", "Rival +1"], ["H", "Destacar último"],
+  ["0-9", "Número de camiseta"], ["⌫", "Borrar camiseta"], ["Espacio", "Play / pausa"], ["← →", "±2 s (Shift ±10 s)"],
+  [", .", "±0,5 s"], ["[ ]", "Velocidad"], ["Ctrl+Z", "Deshacer"], ["Supr", "Borrar evento elegido"]
+];
+const TO_KINDS = ["perdida", "mal pase", "pasos", "dobles", "falta ofensiva", "3/5/8/24 seg", "otra"];
+const FOUL_KINDS = ["personal", "en tiro", "técnica", "antideportiva", "ofensiva"];
+const SHOT_KINDS = ["tiro", "bandeja", "volcada", "fadeaway", "flotadora", "gancho", "palomita"];
+
+function newGame(o = {}) {
+  return Object.assign({
+    id: uid(), createdAt: Date.now(), updatedAt: Date.now(),
+    date: new Date().toISOString().slice(0, 10), comp: "",
+    us: { name: "Mi equipo", color: "#e8641b" }, opp: { name: "Rival", color: "#3b4252" },
+    roster: [], events: [], start: null, qEnd: [], dir: "R", flip: true,
+    official: { us: null, opp: null }, videoName: "", locFor: ["fg"], ai: null, demo: false
+  }, o);
+}
+function periodIdx(g, t) { let p = 0; for (const q of g.qEnd) if (t > q) p++; return p; }
+function periodLabel(p) { return p < 4 ? "Q" + (p + 1) : "TE" + (p - 3); }
+function attackRight(g, t) { const p = periodIdx(g, t); const first = g.dir === "R"; return p < 2 ? first : (g.flip ? !first : first); }
+function playerName(g, j) {
+  if (j == null || j === "") return "Equipo";
+  const r = g.roster.find(p => p.j === String(j));
+  return r && r.n ? `#${j} ${r.n}` : `#${j}`;
+}
+function success(e) {
+  switch (e.type) {
+    case "fg": case "ft": return !!e.d.made;
+    case "pass": return !!e.d.ok;
+    case "to": case "foul": return false;
+    default: return true;
+  }
+}
+function describe(g, e) {
+  const d = e.d || {};
+  switch (e.type) {
+    case "fg": {
+      let s = `${d.pts === 3 ? "Triple" : "Doble"} ${d.made ? "convertido" : "errado"}`;
+      if (d.kind && d.kind !== "tiro") s += ` · ${d.kind}`;
+      if (d.and1) s += " · and-one";
+      if (d.blkd) s += " · tapado";
+      if (d.ast) s += ` · asist. #${d.ast}`;
+      return s;
+    }
+    case "ft": return `Libre ${d.made ? "convertido" : "errado"}`;
+    case "reb": return `Rebote ${d.off ? "ofensivo" : "defensivo"}`;
+    case "to": return `Pérdida${d.kind && d.kind !== "perdida" ? " · " + d.kind : ""}`;
+    case "stl": return "Robo";
+    case "blk": return "Tapa";
+    case "foul": return `Falta ${d.kind || ""}`.trim();
+    case "pass": return `Pase ${d.ok ? "completo" : "errado"}`;
+    case "opp": return `${g.opp.name} +${d.pts}`;
+  }
+  return e.type;
+}
+
+/* ============================================================
+   Estadísticas
+   ============================================================ */
+function line() { return { pts: 0, fgm: 0, fga: 0, p2m: 0, p2a: 0, p3m: 0, p3a: 0, ftm: 0, fta: 0, oreb: 0, dreb: 0, reb: 0, ast: 0, to: 0, stl: 0, blk: 0, pf: 0, pass: 0, passOk: 0, and1: 0, atk: 0, gen: 0, def: 0, val: 0 }; }
+function computeStats(g, evs = g.events) {
+  const team = line(), pl = {};
+  const P = j => (pl[j] ??= line());
+  let oppPts = 0;
+  for (const e of evs) {
+    if (e.type === "opp") { oppPts += e.d.pts || 0; continue; }
+    const L = [team]; if (e.j) L.push(P(e.j));
+    for (const s of L) {
+      const d = e.d;
+      switch (e.type) {
+        case "fg":
+          s.fga++; if (d.pts === 3) { s.p3a++; if (d.made) s.p3m++; } else { s.p2a++; if (d.made) s.p2m++; }
+          if (d.made) { s.fgm++; s.pts += d.pts; s.atk++; }
+          if (d.and1) s.and1++;
+          break;
+        case "ft": s.fta++; if (d.made) { s.ftm++; s.pts++; s.atk++; } break;
+        case "reb": if (d.off) { s.oreb++; s.atk++; } else { s.dreb++; s.def++; } break;
+        case "to": s.to++; break;
+        case "stl": s.stl++; s.def++; break;
+        case "blk": s.blk++; s.def++; break;
+        case "foul": s.pf++; break;
+        case "pass": s.pass++; if (d.ok) { s.passOk++; s.gen++; } break;
+      }
+    }
+    if (e.type === "fg" && e.d.made && e.d.ast) { team.ast++; team.gen++; const a = P(String(e.d.ast)); a.ast++; a.gen++; }
+  }
+  const fin = s => {
+    s.reb = s.oreb + s.dreb;
+    s.val = s.pts + s.reb + s.ast + s.stl + s.blk - (s.fga - s.fgm) - (s.fta - s.ftm) - s.to - s.pf;
+    s.ts = (s.fga + 0.44 * s.fta) ? Math.round(s.pts / (2 * (s.fga + 0.44 * s.fta)) * 100) : 0;
+    s.efg = s.fga ? Math.round((s.fgm + 0.5 * s.p3m) / s.fga * 100) : 0;
+    s.pos = s.atk + s.gen + s.def;
+    return s;
+  };
+  fin(team); Object.values(pl).forEach(fin);
+  team.poss = Math.round(team.fga - team.oreb + team.to + 0.44 * team.fta);
+  team.ppp = team.poss ? (team.pts / team.poss) : 0;
+  return { team, pl, oppPts };
+}
+function scoreOf(g) {
+  const s = computeStats(g);
+  const us = g.official?.us ?? s.team.pts, opp = g.official?.opp ?? s.oppPts;
+  return { us, opp, taggedUs: s.team.pts, taggedOpp: s.oppPts };
+}
+function pointsTimeline(g) {
+  const pts = [];
+  for (const e of g.events) {
+    if (e.type === "opp") pts.push({ t: e.t, side: "opp", v: e.d.pts });
+    else if ((e.type === "fg" || e.type === "ft") && e.d.made) pts.push({ t: e.t, side: "us", v: e.type === "ft" ? 1 : e.d.pts });
+  }
+  return pts.sort((a, b) => a.t - b.t);
+}
+function byPeriod(g) {
+  const n = Math.max(4, g.qEnd.length + (g.events.some(e => periodIdx(g, e.t) >= g.qEnd.length && g.qEnd.length >= 4) ? 1 : 0));
+  const us = Array(n).fill(0), opp = Array(n).fill(0);
+  for (const p of pointsTimeline(g)) { const i = Math.min(periodIdx(g, p.t), n - 1); (p.side === "us" ? us : opp)[i] += p.v; }
+  return { us, opp, n };
+}
+function sortedRosterJs(g, st) {
+  const set = new Set([...g.roster.map(r => r.j), ...Object.keys(st.pl)]);
+  return [...set].filter(Boolean).sort((a, b) => (+a - +b) || a.localeCompare(b));
+}
+
+/* ============================================================
+   Persistencia: nube (db privada por usuario) + copia local
+   ============================================================ */
+/* Configuración de la nube propia (Supabase). Vacío = usa el guardado de Claude o el navegador. */
+const CONFIG = { supabaseUrl: "", supabaseAnonKey: "" };
+const SB = { c: null, user: null };
+const SHARED_ID = (() => { try { return new URLSearchParams(location.search).get("partido"); } catch { return null; } })();
+const LS_KEY = "aro.games.v1", LS_CUR = "aro.current";
+const S = { games: {}, cur: null, db: null, uidv: null, sample: null, downloads: null, dirty: new Set(), saving: false, cloud: "pending" };
+function lsGet(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } }
+function setSave(state, text) {
+  const el = $("#saveState"); el.className = "save-state " + state; el.querySelector("span").textContent = text;
+}
+function cur() { return S.cur && S.games[S.cur] || null; }
+function setCur(id) { S.cur = id; lsSet(LS_CUR, id); }
+let saveTimer = null;
+const cloudReady = () => (SB.c && SB.user) || (S.db && S.uidv);
+function touch(g) {
+  if (S.viewer) return;
+  g.updatedAt = Date.now();
+  S.dirty.add(g.id);
+  lsSet(LS_KEY, S.games);
+  clearTimeout(saveTimer);
+  if (cloudReady()) { setSave("busy", "Guardando…"); saveTimer = setTimeout(flush, 1500); }
+  else setSave("ok", SB.c ? "Guardado en este navegador · ingresá para guardar en la nube" : "Guardado en este navegador");
+}
+const docRef = id => S.db.collection("data/users/" + S.uidv).doc("g-" + id);
+async function flush() {
+  if (S.saving || !cloudReady()) return;
+  S.saving = true;
+  try {
+    while (S.dirty.size) {
+      const id = [...S.dirty][0]; S.dirty.delete(id);
+      const g = S.games[id];
+      try {
+        if (SB.c) {
+          const r = !g ? await SB.c.from("games").delete().eq("id", id)
+            : await SB.c.from("games").upsert({ id: g.id, owner: SB.user.id, data: g, public: !!g.public, updated_at: new Date(g.updatedAt || Date.now()).toISOString() });
+          if (r.error) throw { code: "sb", message: r.error.message };
+        }
+        else if (!g) await docRef(id).delete();
+        else await docRef(id).set(JSON.parse(JSON.stringify(g)));
+      } catch (e) {
+        if (e && e.code === "unavailable") { S.dirty.add(id); await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500)); continue; }
+        setSave("err", e && e.code === "quota_exceeded" ? "Nube llena: guardado solo local" : "Error en la nube: guardado local");
+        S.saving = false; return;
+      }
+    }
+    setSave("ok", "Guardado en la nube");
+  } finally { S.saving = false; }
+  if (S.dirty.size) flush();
+}
+function loadScript(src) { return new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = src; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); }); }
+function renderAuth() {
+  const el = $("#authBox"); if (!el) return;
+  if (S.viewer) { el.innerHTML = `<span class="small" style="color:#bdb8ad">Vista compartida · solo lectura</span>`; return; }
+  if (!SB.c) { el.innerHTML = ""; return; }
+  el.innerHTML = SB.user ? `<span class="small" style="color:#bdb8ad">${esc(SB.user.email || "")}</span><button class="btn sm ghost" style="color:#f5f1e8" id="sbOut">Salir</button>`
+    : `<button class="btn sm pri" id="sbIn">Ingresar</button>`;
+  const i = $("#sbIn"), o = $("#sbOut");
+  if (o) o.onclick = async () => { await SB.c.auth.signOut(); toast("Sesión cerrada"); };
+  if (i) i.onclick = () => modal(`<h3>Ingresar a Aro</h3><p class="small muted" style="margin-top:0">Te mandamos un link a tu mail para entrar, sin contraseña. Tus partidos quedan guardados en la nube y podés compartirlos.</p>
+    <form id="sbForm" class="row" style="flex-wrap:nowrap"><input class="inp" type="email" name="email" required placeholder="tu@mail.com" style="flex:1"><button class="btn pri">Enviar link</button></form><p class="small" id="sbMsg"></p>`, (m, close) => {
+    m.querySelector("#sbForm").onsubmit = async ev => {
+      ev.preventDefault(); const email = ev.target.email.value.trim();
+      const { error } = await SB.c.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+      m.querySelector("#sbMsg").textContent = error ? "No se pudo enviar: " + error.message : "Listo: revisá tu mail y abrí el link desde esta computadora.";
+    };
+  });
+}
+async function pullSB() {
+  setSave("busy", "Sincronizando…");
+  const { data, error } = await SB.c.from("games").select("id,data").eq("owner", SB.user.id);
+  if (error) { setSave("err", "Error en la nube: guardado local"); return; }
+  let pulled = 0; const ids = new Set();
+  for (const row of data || []) {
+    const g = row.data; if (!g || !g.id) continue; ids.add(g.id);
+    const loc = S.games[g.id];
+    if (!loc || (g.updatedAt || 0) > (loc.updatedAt || 0)) { S.games[g.id] = g; pulled++; }
+    else if ((loc.updatedAt || 0) > (g.updatedAt || 0)) S.dirty.add(g.id);
+  }
+  for (const g of Object.values(S.games)) if (!ids.has(g.id)) S.dirty.add(g.id);
+  lsSet(LS_KEY, S.games);
+  setSave("ok", "Guardado en la nube");
+  if (S.dirty.size) await flush();
+  if (pulled) render();
+}
+async function initSupabase() {
+  try { await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"); }
+  catch { setSave("err", "Sin conexión a la nube: guardado en este navegador"); return; }
+  SB.c = supabase.createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey);
+  if (SHARED_ID) {
+    S.viewer = true;
+    const { data, error } = await SB.c.from("games").select("data").eq("id", SHARED_ID).maybeSingle();
+    if (error || !data) { S.games = {}; S.cur = null; S.sharedMissing = true; }
+    else { const g = data.data; S.games = { [g.id]: g }; S.cur = g.id; }
+    setSave("ok", "Partido compartido"); renderAuth(); render(); return;
+  }
+  const { data: { session } } = await SB.c.auth.getSession();
+  SB.user = session ? session.user : null;
+  SB.c.auth.onAuthStateChange((ev, sess) => {
+    const was = SB.user && SB.user.id; SB.user = sess ? sess.user : null; renderAuth();
+    if (SB.user && SB.user.id !== was) pullSB();
+    if (!SB.user) setSave("ok", "Guardado en este navegador · ingresá para guardar en la nube");
+  });
+  renderAuth();
+  if (SB.user) await pullSB(); else setSave("ok", "Guardado en este navegador · ingresá para guardar en la nube");
+}
+async function initStore() {
+  const viewing = !!(CONFIG.supabaseUrl && SHARED_ID);
+  S.games = viewing ? {} : (lsGet(LS_KEY, {}) || {});
+  S.cur = viewing ? null : lsGet(LS_CUR, null);
+  if (CONFIG.supabaseUrl) return initSupabase();
+  setSave("ok", "Guardado en este navegador");
+  if (!window.claude || !claude.use) return;
+  claude.use("sample").then(s => { S.sample = s; if (route === "analisis") renderGame(); }).catch(() => {});
+  claude.use("downloads").then(d => { S.downloads = d; }).catch(() => {});
+  try {
+    const [db, user] = await Promise.all([claude.use("db"), claude.use("user")]);
+    if (!db || !user) return;
+    const id = await user.id();
+    if (!id) return;
+    S.db = db; S.uidv = id;
+    setSave("busy", "Conectando con la nube…");
+    const snap = await Promise.race([db.collection("data/users/" + id).get(), new Promise((_, rej) => setTimeout(() => rej({ code: "timeout" }), 10000))]);
+    let pulled = 0;
+    for (const d of snap.docs) {
+      const g = d.data(); if (!g || !g.id) continue;
+      const loc = S.games[g.id];
+      if (!loc || (g.updatedAt || 0) > (loc.updatedAt || 0)) { S.games[g.id] = JSON.parse(JSON.stringify(g)); pulled++; }
+    }
+    const remoteIds = new Set(snap.docs.map(d => d.id));
+    for (const g of Object.values(S.games)) {
+      const rd = snap.docs.find(d => d.id === "g-" + g.id);
+      if (!remoteIds.has("g-" + g.id) || (rd && (rd.data().updatedAt || 0) < (g.updatedAt || 0))) S.dirty.add(g.id);
+    }
+    // Partidos preparados para importar (los deja Claude en "imports/"): se copian al espacio privado y se borran de ahí
+    const imported = [];
+    try {
+      const imp = await db.collection("imports").get();
+      for (const d of imp.docs) {
+        const g = d.data(); if (!g || !g.id) continue;
+        imported.push(d.id);
+        if (!S.games[g.id]) { S.games[g.id] = JSON.parse(JSON.stringify(g)); S.dirty.add(g.id); pulled++; S.cur = g.id; lsSet(LS_CUR, g.id); }
+      }
+    } catch (e) { }
+    lsSet(LS_KEY, S.games);
+    setSave("ok", "Guardado en la nube");
+    if (S.dirty.size) await flush();
+    if (imported.length && !S.dirty.size) { for (const id of imported) { try { await db.doc("imports/" + id).delete(); } catch (e) { } } }
+    if (pulled) { if (imported.length) toast("Partido importado: abrilo en Análisis"); render(); }
+  } catch (e) {
+    setSave("err", "Sin nube: guardado en este navegador");
+  }
+}
+
+/* ============================================================
+   Video compartido entre vistas
+   ============================================================ */
+const video = document.createElement("video");
+video.preload = "auto"; video.playsInline = true;
+const V = { url: null, name: "", playlist: null, idx: 0, clipEnd: null, onClip: null };
+function loadVideoFile(file) {
+  if (!file) return;
+  if (V.url) URL.revokeObjectURL(V.url);
+  V.url = URL.createObjectURL(file); V.name = file.name;
+  video.src = V.url;
+  if (PL.yt) try { PL.yt.pauseVideo(); } catch (e) { }
+  const g = cur();
+  if (g) {
+    if (g.videoName && g.videoName !== file.name) toast(`Ojo: este partido se etiquetó con “${g.videoName}”`, "warn");
+    if (!g.videoName) { g.videoName = file.name; touch(g); }
+  }
+  render();
+}
+$("#videoInput").addEventListener("change", e => { loadVideoFile(e.target.files[0]); e.target.value = ""; });
+
+/* ---------- YouTube ---------- */
+function ytIdFrom(s) {
+  s = String(s || "").trim(); if (!s) return null;
+  if (/^[\w-]{11}$/.test(s)) return s;
+  const m = s.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/|\/live\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+const PL = { yt: null, ytReady: false, ytId: null, api: null, wrap: null, shield: null };
+function loadYTApi() {
+  if (PL.api) return; PL.api = "loading";
+  window.onYouTubeIframeAPIReady = () => { PL.api = "ok"; ensureYT(); };
+  const sc = document.createElement("script"); sc.src = "https://www.youtube.com/iframe_api";
+  sc.onerror = () => { PL.api = "blocked"; render(); };
+  document.head.appendChild(sc);
+  setTimeout(() => { if (PL.api === "loading") { PL.api = "blocked"; render(); } }, 9000);
+}
+function ensureYT() {
+  const g = cur(); if (!g || !g.yt || PL.api !== "ok" || !window.YT || !YT.Player) return;
+  if (!PL.wrap) {
+    PL.wrap = document.createElement("div"); PL.wrap.id = "ytWrap";
+    PL.wrap.innerHTML = `<div id="ytPlayer"></div><div class="yt-shield" title="Clic: play / pausa"></div>`;
+    document.body.appendChild(PL.wrap);
+    PL.shield = PL.wrap.querySelector(".yt-shield");
+    PL.shield.addEventListener("click", () => togglePlay());
+  }
+  if (!PL.yt) {
+    PL.ytId = g.yt; PL.ytReady = false;
+    PL.yt = new YT.Player("ytPlayer", {
+      videoId: g.yt, width: "100%", height: "100%",
+      playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1, iv_load_policy: 3 },
+      events: {
+        onReady: () => { PL.ytReady = true; placeYT(); if (route === "etiquetar") updateTagClock(); const n = $("#gNow"); if (n && !n.textContent) n.textContent = "Elegí una jugada o reproducí la selección"; },
+        onError: () => toast("YouTube no pudo cargar el video. Revisá que el link sea correcto y que el video no sea privado.", "err")
+      }
+    });
+  } else if (PL.ytId !== g.yt && PL.ytReady) { PL.ytId = g.yt; PL.yt.cueVideoById(g.yt); }
+  placeYT();
+}
+function placeYT() {
+  if (!PL.wrap) return;
+  const box = $(".ytbox");
+  const g = cur();
+  if (!box || !g || !g.yt || V.url || g.yt !== PL.ytId) {
+    if (PL.wrap.style.display !== "none") { PL.wrap.style.display = "none"; if (PL.ytReady) try { PL.yt.pauseVideo(); } catch (e) { } }
+    return;
+  }
+  const r = box.getBoundingClientRect();
+  const st = PL.wrap.style;
+  const L = (r.left + scrollX) + "px", T = (r.top + scrollY) + "px", W = r.width + "px", H = r.height + "px";
+  if (st.left !== L) st.left = L; if (st.top !== T) st.top = T; if (st.width !== W) st.width = W; if (st.height !== H) st.height = H;
+  st.display = "block";
+  PL.shield.style.display = route === "etiquetar" ? "block" : "none";
+}
+window.addEventListener("resize", placeYT);
+const ytLink = (g, t) => `https://youtu.be/${g.yt}?t=${Math.max(0, Math.floor(t))}`;
+
+/* ---------- Reproductor unificado: archivo local o YouTube ---------- */
+function srcKind() {
+  if (V.url) return "file";
+  const g = cur();
+  if (g && g.yt && PL.ytReady && PL.ytId === g.yt) return "yt";
+  return null;
+}
+const hasVideo = () => !!srcKind();
+const P = {
+  time() { const k = srcKind(); return k === "file" ? video.currentTime : k === "yt" ? (PL.yt.getCurrentTime() || 0) : 0; },
+  set(t) { const k = srcKind(); t = Math.max(0, t); if (k === "file") video.currentTime = Math.min(t, video.duration || t); else if (k === "yt") PL.yt.seekTo(t, true); },
+  play() { const k = srcKind(); if (k === "file") video.play().catch(() => { }); else if (k === "yt") PL.yt.playVideo(); },
+  pause() { const k = srcKind(); if (k === "file") video.pause(); else if (k === "yt") PL.yt.pauseVideo(); },
+  paused() { const k = srcKind(); if (k === "file") return video.paused; if (k === "yt") { const s = PL.yt.getPlayerState(); return s !== 1 && s !== 3; } return true; },
+  dur() { const k = srcKind(); return k === "file" ? (video.duration || 0) : k === "yt" ? (PL.yt.getDuration() || 0) : 0; },
+  rate(r) { const k = srcKind(); if (r == null) return k === "yt" ? PL.yt.getPlaybackRate() : video.playbackRate; if (k === "file") video.playbackRate = r; else if (k === "yt") PL.yt.setPlaybackRate(r); },
+  rates() { return srcKind() === "yt" ? (PL.yt.getAvailablePlaybackRates() || [1]) : [0.5, 0.75, 1, 1.25, 1.5, 2, 3]; }
+};
+function ytForm(g) {
+  return `<form class="row yt-form" style="justify-content:center;flex-wrap:nowrap;width:100%;max-width:420px"><input class="inp" name="yt" placeholder="Pegá el link de YouTube del partido" style="flex:1;min-width:0"><button class="btn sm pri">Usar</button></form>`;
+}
+function bindYtForm(root) {
+  $$(".yt-form", root).forEach(f => f.onsubmit = ev => {
+    ev.preventDefault(); const id = ytIdFrom(f.yt.value); const g = cur();
+    if (!id) { toast("Ese link no parece de YouTube", "err"); return; }
+    g.yt = id; g.ytUrl = f.yt.value.trim(); touch(g); toast("Video de YouTube vinculado"); render();
+  });
+}
+function mountVideo(box) {
+  if (!box) return;
+  const g = cur();
+  if (V.url) {
+    box.innerHTML = ""; box.appendChild(video);
+    video.controls = route === "analisis";
+  } else if (g && g.yt) {
+    loadYTApi();
+    if (PL.api === "blocked") {
+      box.innerHTML = `<div class="vdrop"><div style="font:700 20px 'Barlow Condensed',sans-serif">Video en YouTube</div>
+        <div class="small" style="max-width:420px">Esta vista no permite reproducir YouTube adentro de la página. Cada jugada tiene su botón <b>↗ YouTube</b> que abre el video en el segundo exacto. En la versión de Aro en tu sitio se reproduce acá mismo.</div>
+        <div class="row" style="justify-content:center"><a class="btn pri" href="${ytLink(g, 0)}" target="_blank" rel="noopener">Abrir en YouTube</a><button class="btn" data-pickvideo>Usar el archivo local</button></div></div>`;
+    } else {
+      box.innerHTML = `<div class="ytbox" style="position:absolute;inset:0"></div><div class="small" style="color:#bbb">Cargando YouTube…</div>`;
+      ensureYT(); requestAnimationFrame(placeYT);
+    }
+  } else {
+    box.innerHTML = `<div class="vdrop"><div style="font:700 20px 'Barlow Condensed',sans-serif">Vinculá el video del partido</div>
+      ${ytForm(g)}
+      <div class="small" style="max-width:380px">o usá el archivo de tu computadora (por ejemplo, la descarga de la Veo). El archivo local no se sube a ningún lado.</div>
+      <button class="btn" data-pickvideo>Elegir archivo</button></div>`;
+    const dz = box.querySelector(".vdrop");
+    dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("over"); });
+    dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+    dz.addEventListener("drop", e => { e.preventDefault(); dz.classList.remove("over"); loadVideoFile(e.dataTransfer.files[0]); });
+    bindYtForm(box);
+  }
+}
+document.addEventListener("click", e => { if (e.target.closest("[data-pickvideo]")) $("#videoInput").click(); });
+const OFF = () => (cur() && cur().vOffset) || 0;
+const vt = () => hasVideo() ? P.time() - OFF() : 0;
+function seek(t) { if (!hasVideo()) return; P.set(t + OFF()); }
+function clipStart(e) { return e.t - (CLIP[e.type] || [4, 2])[0] + OFF(); }
+function playClip(g, e, keepPlaylist = false) {
+  if (!e) return;
+  if (!hasVideo()) {
+    if (g.yt && PL.api === "blocked") {
+      const n = $("#gNow"); if (n) n.innerHTML = `${esc(describe(g, e))} · <a href="${ytLink(g, clipStart(e))}" target="_blank" rel="noopener">abrir en YouTube ↗</a>`;
+      GV.nowId = e.id; $$(".clip").forEach(c => c.classList.toggle("now", c.dataset.clip === e.id));
+    } else toast(g.yt ? "Esperá a que cargue el video" : "Vinculá el video para ver la jugada", "warn");
+    return;
+  }
+  if (!keepPlaylist) V.playlist = null;
+  const [pre, post] = CLIP[e.type] || [4, 2];
+  V.clipEnd = e.t + post + OFF();
+  P.set(e.t - pre + OFF());
+  P.play();
+  V.onClip && V.onClip(e);
+}
+function playList(g, list) {
+  if (!list.length) { toast("No hay jugadas para reproducir", "warn"); return; }
+  if (!hasVideo()) { toast(g.yt && PL.api === "blocked" ? "En esta vista las listas no se pueden reproducir: abrí cada jugada en YouTube" : "Vinculá el video para reproducir", "warn"); return; }
+  V.playlist = list; V.idx = 0; playClip(g, list[0], true);
+}
+function nextInList(step = 1) {
+  const g = cur(); if (!V.playlist || !g) return;
+  V.idx += step;
+  if (V.idx < 0) V.idx = 0;
+  if (V.idx >= V.playlist.length) { V.playlist = null; V.clipEnd = null; P.pause(); V.onClip && V.onClip(null); return; }
+  playClip(g, V.playlist[V.idx], true);
+}
+function onTick() {
+  placeYT();
+  if (!hasVideo()) return;
+  if (route === "etiquetar") updateTagClock();
+  if (V.clipEnd != null && P.time() >= V.clipEnd) {
+    if (V.playlist) nextInList(1); else { P.pause(); V.clipEnd = null; }
+  }
+}
+setInterval(onTick, 200);
+video.addEventListener("click", () => { if (route === "etiquetar") togglePlay(); });
+
+/* ============================================================
+   Ruteo
+   ============================================================ */
+let route = "inicio";
+function go(r) { if (location.hash !== "#" + r) location.hash = r; else render(); }
+window.addEventListener("hashchange", render);
+document.addEventListener("click", e => { const b = e.target.closest("[data-go]"); if (b && !b.disabled) go(b.dataset.go); });
+function render() {
+  if (S.viewer || (CONFIG.supabaseUrl && SHARED_ID)) {
+    $$(".nav button").forEach(b => b.classList.add("hidden"));
+    $(".brand").removeAttribute("data-go");
+    route = "analisis";
+    if (!cur()) { $("#app").innerHTML = `<div class="card empty">${S.sharedMissing ? "Este partido no existe o ya no está compartido." : "Cargando partido…"}</div>`; return; }
+    route = "analisis"; renderGame(); return;
+  }
+  let r = (location.hash || "#inicio").slice(1);
+  if (!["inicio", "etiquetar", "analisis"].includes(r)) r = "inicio";
+  if (r !== "inicio" && !cur()) r = "inicio";
+  if (route !== r) { V.playlist = null; V.clipEnd = null; if (hasVideo()) P.pause(); V.onClip = null; }
+  route = r;
+  $$(".nav button").forEach(b => { b.classList.toggle("on", b.dataset.go === r); if (b.dataset.go !== "inicio") b.disabled = !cur(); });
+  if (r === "inicio") renderHome();
+  else if (r === "etiquetar") renderTag();
+  else renderGame();
+}
+
+/* ============================================================
+   INICIO
+   ============================================================ */
+function parseRoster(txt) {
+  return txt.split(/\n|;/).map(l => l.trim()).filter(Boolean).map(l => {
+    const m = l.match(/^#?\s*(\d{1,2})\s*[-–:.]?\s*(.*)$/);
+    return m ? { j: m[1], n: m[2].trim() } : null;
+  }).filter(Boolean);
+}
+const rosterTxt = g => g.roster.map(r => `${r.j} ${r.n || ""}`.trim()).join("\n");
+function badge(t, size = "") { return `<div class="badge" style="background:${esc(t.color)};color:${contrastInk(t.color)};${size}">${esc(initials(t.name))}</div>`; }
+function renderHome() {
+  const list = Object.values(S.games).sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.createdAt - a.createdAt);
+  const last = list[0];
+  $("#app").innerHTML = `
+  <section class="hero">
+    <div class="card pad" style="display:flex;flex-direction:column;justify-content:space-between;gap:16px">
+      <div>
+        <div class="eyebrow">Análisis de básquet desde el video</div>
+        <h1>Etiquetá el partido.<br>Aro arma el análisis.</h1>
+        <p class="muted" style="max-width:560px;margin:0">Cargá el video, marcá cada acción con el teclado mientras mirás y obtené box score, mapa de tiros, mapa de calor, evolución del marcador, impacto por jugador, highlights y un informe con IA. Cada número te lleva a la jugada en el video.</p>
+      </div>
+      <div class="row">
+        <button class="btn" id="demoBtn">Ver partido de ejemplo</button>
+        <button class="btn" id="importBtn">Importar respaldo (.json)</button>
+      </div>
+    </div>
+    <form class="card pad grid" id="newForm" style="gap:12px">
+      <h2 style="font-size:24px">Nuevo partido</h2>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <label class="f">Fecha<input type="date" name="date" value="${new Date().toISOString().slice(0, 10)}" required></label>
+        <label class="f">Competencia<input name="comp" placeholder="Liga Federal, amistoso…" value="${esc(last?.comp || "")}"></label>
+        <label class="f">Equipo analizado<input name="us" required placeholder="Nombre del club" value="${esc(last?.us.name || "")}"></label>
+        <label class="f">Color<input type="color" name="usc" value="${esc(last?.us.color || "#e8641b")}" style="height:40px;padding:3px"></label>
+        <label class="f">Rival<input name="opp" required placeholder="Nombre del rival"></label>
+        <label class="f">Color rival<input type="color" name="oppc" value="#3b4252" style="height:40px;padding:3px"></label>
+      </div>
+      <label class="f">Link de YouTube del partido (opcional)<input name="yt" placeholder="https://youtu.be/…"></label>
+      <label class="f">Plantel (una línea por jugador: número y nombre, opcional)
+        <textarea name="roster" rows="4" placeholder="4 Gómez&#10;10 Benítez&#10;32 Acosta">${esc(last ? rosterTxt(last) : "")}</textarea></label>
+      <div class="row" style="justify-content:flex-end"><button class="btn pri" type="submit">Crear y empezar a etiquetar →</button></div>
+    </form>
+  </section>
+  <div class="sec-title"><h2>Partidos</h2><span class="muted small">${list.length} ${list.length === 1 ? "partido" : "partidos"}</span></div>
+  ${list.length ? `<div class="games">${list.map(gameCard).join("")}</div>` : `<div class="card empty">Todavía no hay partidos. Creá uno o abrí el de ejemplo para recorrer el análisis.</div>`}`;
+  $("#newForm").onsubmit = ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const ytv = ytIdFrom(f.get("yt"));
+    const g = newGame({ yt: ytv, ytUrl: ytv ? f.get("yt").trim() : "", date: f.get("date"), comp: f.get("comp").trim(), us: { name: f.get("us").trim(), color: f.get("usc") }, opp: { name: f.get("opp").trim(), color: f.get("oppc") }, roster: parseRoster(f.get("roster")) });
+    S.games[g.id] = g; setCur(g.id); touch(g); go("etiquetar");
+  };
+  $("#demoBtn").onclick = () => { const g = makeDemo(); S.games[g.id] = g; setCur(g.id); touch(g); go("analisis"); };
+  $("#importBtn").onclick = () => $("#jsonInput").click();
+  $$("[data-open]").forEach(b => b.onclick = () => { setCur(b.dataset.id); go(b.dataset.open); });
+  $$("[data-del]").forEach(b => b.onclick = async () => {
+    const g = S.games[b.dataset.del];
+    if (!(await confirmBox(`Se borra “${g.us.name} vs ${g.opp.name}” con todas sus jugadas etiquetadas.`, "Borrar"))) return;
+    delete S.games[g.id]; if (S.cur === g.id) setCur(null);
+    S.dirty.add(g.id); lsSet(LS_KEY, S.games); if (S.db) flush(); renderHome();
+  });
+  $$("[data-exp]").forEach(b => b.onclick = () => exportJSON(S.games[b.dataset.exp]));
+}
+function gameCard(g) {
+  const sc = scoreOf(g), res = sc.us > sc.opp ? "w" : sc.us < sc.opp ? "l" : "d";
+  return `<div class="card gcard">
+    <div class="row" style="justify-content:space-between"><span class="eyebrow">${esc(g.date)}${g.comp ? " · " + esc(g.comp) : ""}</span>
+      ${g.demo ? `<span class="pill d">Ejemplo</span>` : `<span class="pill ${res}">${res === "w" ? "Victoria" : res === "l" ? "Derrota" : "Empate"}</span>`}</div>
+    <div class="sc">
+      <div class="row" style="flex-wrap:nowrap">${badge(g.us)}<div class="tname">${esc(g.us.name)}</div></div>
+      <div class="num">${sc.us}<span class="muted"> – </span>${sc.opp}</div>
+      <div class="row" style="flex-wrap:nowrap;justify-content:flex-end;text-align:right"><div class="tname">${esc(g.opp.name)}</div>${badge(g.opp)}</div>
+    </div>
+    <div class="muted small">${g.events.length} jugadas etiquetadas${g.videoName ? " · " + esc(g.videoName) : ""}</div>
+    <div class="row">
+      <button class="btn sm pri" data-open="analisis" data-id="${g.id}">Análisis</button>
+      <button class="btn sm" data-open="etiquetar" data-id="${g.id}">Etiquetar</button>
+      <span style="flex:1"></span>
+      <button class="btn sm ghost" data-exp="${g.id}" title="Descargar respaldo">Respaldo</button>
+      <button class="btn sm ghost danger" data-del="${g.id}">Borrar</button>
+    </div></div>`;
+}
+$("#jsonInput").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try {
+    const g = JSON.parse(await f.text());
+    if (!g || !Array.isArray(g.events) || !g.us || !g.opp) throw 0;
+    const ng = Object.assign(newGame(), g, { id: S.games[g.id] ? uid() : (g.id || uid()), updatedAt: Date.now() });
+    S.games[ng.id] = ng; setCur(ng.id); touch(ng); toast("Partido importado"); go("analisis");
+  } catch { toast("Ese archivo no es un respaldo válido de Aro", "err"); }
+});
+
+/* ============================================================
+   ETIQUETAR
+   ============================================================ */
+const TG = { jbuf: "", lastDigit: 0, pending: null, awaitLoc: null, sel: null, undo: [], relocate: false, tab: "ev" };
+function pushUndo(g) { TG.undo.push(JSON.stringify(g.events)); if (TG.undo.length > 40) TG.undo.shift(); }
+function sortEvents(g) { g.events.sort((a, b) => a.t - b.t); }
+function renderTag() {
+  const g = cur();
+  $("#app").innerHTML = `
+  <div class="row" style="justify-content:space-between;margin-bottom:12px">
+    <div class="row">${badge(g.us)}<div><div class="eyebrow">${esc(g.date)}${g.comp ? " · " + esc(g.comp) : ""}</div><h2 style="font-size:26px">${esc(g.us.name)} vs ${esc(g.opp.name)}</h2></div></div>
+    <div class="row"><button class="btn" data-pickvideo>${V.url ? "Cambiar archivo" : "Usar archivo local"}</button><button class="btn dark" data-go="analisis">Ver análisis →</button></div>
+  </div>
+  <div class="tag-grid">
+    <div class="grid" style="gap:12px">
+      <div><div class="vbox" id="tagVideo"></div>
+        <div class="vbar">
+          <button class="btn sm" id="tPlay">▶</button>
+          <span class="time num" id="tClock">0:00 / 0:00</span>
+          <input type="range" class="scrub" id="tScrub" min="0" max="1000" value="0">
+          <select class="inp" id="tRate" style="padding:5px 8px">${[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map(r => `<option value="${r}" ${r === 1 ? "selected" : ""}>${r}×</option>`).join("")}</select>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tabs"><button data-tab="ev" class="${TG.tab === "ev" ? "on" : ""}">Jugadas (${g.events.length})</button><button data-tab="set" class="${TG.tab === "set" ? "on" : ""}">Partido y plantel</button><button data-tab="keys" class="${TG.tab === "keys" ? "on" : ""}">Atajos</button></div>
+        <div id="tagTab"></div>
+      </div>
+    </div>
+    <div class="grid" style="gap:12px">
+      <div class="card status">
+        <div class="jbig"><small>Camiseta</small><span id="tJ">${TG.jbuf ? "#" + esc(TG.jbuf) : "—"}</span></div>
+        <div><div class="eyebrow" id="tPeriod"></div><div class="small muted" id="tDir"></div><div class="small" id="tName"></div></div>
+        <div class="live num" id="tScore"></div>
+      </div>
+      <div class="card pad" style="padding:12px">
+        <div class="court-wrap" id="tCourtWrap"></div>
+        <div class="row small muted" style="margin-top:8px;justify-content:space-between"><span>Clic en la cancha = lugar de la acción. Después, la tecla.</span><button class="btn sm" id="tFlipDir">Invertir dirección</button></div>
+      </div>
+      <div class="card" id="tEdit"></div>
+      <div class="card pad" style="padding:12px 14px">
+        <div class="eyebrow" style="margin-bottom:8px">Teclas rápidas</div>
+        <div class="legend">${LEGEND.slice(0, 20).map(([k, l]) => `<div><kbd>${k}</kbd><span>${l}</span></div>`).join("")}</div>
+      </div>
+    </div>
+  </div>`;
+  mountVideo($("#tagVideo"));
+  $("#tPlay").onclick = togglePlay;
+  $("#tScrub").oninput = e => { if (hasVideo() && P.dur()) P.set(e.target.value / 1000 * P.dur()); };
+  $("#tRate").onchange = e => { P.rate(+e.target.value); e.target.blur(); };
+  $("#tScrub").onchange = e => e.target.blur();
+  if (hasVideo()) $("#tRate").value = String(P.rate() || 1);
+  $("#tFlipDir").onclick = () => { g.dir = g.dir === "R" ? "L" : "R"; touch(g); updateTagClock(); drawTagCourt(); toast("Dirección de ataque invertida"); };
+  $$(".tabs [data-tab]").forEach(b => b.onclick = () => { TG.tab = b.dataset.tab; renderTag(); });
+  renderTagTab(); renderEdit(); updateTagClock(); drawTagCourt();
+}
+function updateTagClock() {
+  const g = cur(); if (!g || route !== "etiquetar" || !$("#tClock")) return;
+  const t = vt(), d = hasVideo() ? P.dur() : 0;
+  $("#tClock").textContent = `${fmtT(t)} / ${fmtT(d)}`;
+  if (d && document.activeElement !== $("#tScrub")) $("#tScrub").value = Math.round((t + OFF()) / d * 1000);
+  $("#tPlay").textContent = P.paused() ? "▶" : "❚❚";
+  const p = periodIdx(g, t);
+  $("#tPeriod").textContent = `${periodLabel(p)} · ${fmtT(t)}`;
+  $("#tDir").textContent = `${esc(g.us.name)} ataca hacia la ${attackRight(g, t) ? "derecha →" : "← izquierda"}`;
+  const sc = scoreAt(g, t);
+  $("#tScore").innerHTML = `<small>Marcador</small>${sc.us} – ${sc.opp}`;
+  if (Date.now() > (TG.flashUntil || 0)) { $("#tName").textContent = TG.jbuf ? playerName(g, TG.jbuf) : "Escribí el número antes de la tecla"; $("#tName").style.color = ""; }
+  if (!updateTagClock.lastDraw || Math.abs(updateTagClock.lastDraw - t) > 1.5) { updateTagClock.lastDraw = t; drawTagCourt(); }
+}
+function scoreAt(g, t) { let us = 0, opp = 0; for (const p of pointsTimeline(g)) { if (p.t > t + 0.01) break; p.side === "us" ? us += p.v : opp += p.v; } return { us, opp }; }
+function denorm(g, e) { return attackRight(g, e.t) ? [e.x, e.y] : [100 - e.x, 100 - e.y]; }
+function drawTagCourt() {
+  const g = cur(), wrap = $("#tCourtWrap"); if (!wrap) return;
+  const t = vt(), right = attackRight(g, t);
+  let inner = "";
+  const [ax] = right ? [22] : [6];
+  inner += `<text x="${ax}" y="1.35" font-size=".9" font-weight="700" fill="rgba(255,255,255,.85)" text-anchor="middle" font-family="Barlow Condensed, sans-serif",Barlow,sans-serif>${right ? "ATACAMOS →" : "← ATACAMOS"}</text>`;
+  const recent = g.events.filter(e => e.x != null && e.t <= t + 1 && e.t >= t - 90);
+  for (const e of recent) {
+    const [x, y] = denorm(g, e); const [mx, my] = toM(x, y);
+    const sel = e.id === TG.sel;
+    inner += `<circle cx="${mx}" cy="${my}" r="${sel ? .42 : .3}" fill="${TYPE_COLOR[e.type]}" stroke="${sel ? "#fff" : "rgba(0,0,0,.4)"}" stroke-width="${sel ? .12 : .05}" opacity="${sel ? 1 : .8}"/>`;
+  }
+  if (TG.pending) {
+    const fake = { t, x: TG.pending[0], y: TG.pending[1] }; const [x, y] = denorm(g, fake); const [mx, my] = toM(x, y);
+    inner += `<circle cx="${mx}" cy="${my}" r=".55" fill="none" stroke="#fff" stroke-width=".12"/><circle cx="${mx}" cy="${my}" r=".15" fill="#fff"/>`;
+  }
+  wrap.innerHTML = courtSVG({ id: "tCourt", inner });
+  const msg = TG.awaitLoc ? "Clic en la cancha para ubicar la jugada (Esc cancela)" : TG.relocate ? "Clic en la cancha para reubicar la jugada elegida" : TG.pending ? "Lugar marcado: ahora la tecla de la acción" : "";
+  if (msg) wrap.insertAdjacentHTML("beforeend", `<div class="court-msg">${msg}</div>`);
+  $("#tCourt").addEventListener("mousedown", onCourtClick);
+}
+function normalizeClick(g, t, [x, y]) { return attackRight(g, t) ? [r2(x), r2(y)] : [r2(100 - x), r2(100 - y)]; }
+function autoKind(e) { if (e.type === "fg" && e.x != null && !e.d.kindSet) e.d.kind = (e.d.pts === 2 && distRim(e.x, e.y) < 1.7) ? "bandeja" : "tiro"; }
+function checkShot(e) {
+  if (e.type !== "fg" || e.x == null) return;
+  const three = isThreeLoc(e.x, e.y);
+  if (three && e.d.pts === 2) toast("Ubicado detrás de la línea de 3 pero marcado como doble", "warn");
+  if (!three && e.d.pts === 3 && distRim(e.x, e.y) < 6.2) toast("Ubicado dentro de la línea de 3 pero marcado como triple", "warn");
+}
+function onCourtClick(ev) {
+  const g = cur(); ev.preventDefault();
+  const t = vt();
+  const raw = svgPoint($("#tCourt"), ev);
+  const target = TG.awaitLoc || (TG.relocate && TG.sel);
+  if (target) {
+    const e = g.events.find(x => x.id === target);
+    if (e) {
+      pushUndo(g);
+      [e.x, e.y] = normalizeClick(g, e.t, raw); autoKind(e); checkShot(e); touch(g);
+      toast("Ubicación guardada");
+    }
+    TG.awaitLoc = null; TG.relocate = false;
+    renderTagTab(); renderEdit(); drawTagCourt(); return;
+  }
+  TG.pending = normalizeClick(g, t, raw);
+  drawTagCourt();
+}
+function togglePlay() { if (!hasVideo()) { toast("Vinculá el video del partido (YouTube o archivo)", "warn"); return; } P.paused() ? P.play() : P.pause(); }
+function addFromKey(def) {
+  const g = cur(); const t = r2(vt());
+  if (!hasVideo()) toast("Sin video: la jugada se guarda en el segundo 0", "warn");
+  pushUndo(g);
+  const e = { id: uid(), t, type: def.type, team: def.type === "opp" ? "opp" : "us", j: def.type === "opp" ? null : (TG.jbuf || null), d: JSON.parse(JSON.stringify(def.d)), x: null, y: null };
+  if (e.type === "ft") { [e.x, e.y] = toP(CW - 5.8, RIM_Y).map(r2); }
+  else if (e.type !== "opp") {
+    if (TG.pending) { [e.x, e.y] = TG.pending; TG.pending = null; }
+    else if (g.locFor.includes(e.type)) TG.awaitLoc = e.id;
+  }
+  if (e.type === "fg") { autoKind(e); checkShot(e); }
+  if (e.team === "us" && !e.j && !["opp"].includes(e.type)) toast("Sin camiseta: queda como jugada del equipo", "warn");
+  g.events.push(e); sortEvents(g); TG.sel = e.id; touch(g);
+  flashName(describe(g, e) + (e.j ? " · " + playerName(g, e.j) : ""));
+  renderTagTab(); renderEdit(); drawTagCourt(); updateTagClock();
+}
+function flashName(s) { TG.flashUntil = Date.now() + 1500; const el = $("#tName"); if (el) { el.textContent = "✓ " + s; el.style.color = "var(--ok)"; setTimeout(() => { if (el.isConnected) updateTagClock(); }, 1550); } }
+function lastMadeShot(g, before = Infinity) {
+  for (let i = g.events.length - 1; i >= 0; i--) { const e = g.events[i]; if (e.type === "fg" && e.d.made && e.t <= before + 0.5) return e; }
+  return null;
+}
+function assist() {
+  const g = cur();
+  if (!TG.jbuf) { toast("Escribí la camiseta de quien asistió y después V", "warn"); return; }
+  const s = lastMadeShot(g, vt());
+  if (!s) { toast("No hay un tiro convertido para asignarle la asistencia", "warn"); return; }
+  if (s.j === TG.jbuf) { toast("El asistidor no puede ser el mismo que convirtió", "warn"); return; }
+  pushUndo(g); s.d.ast = TG.jbuf; TG.sel = s.id; touch(g);
+  flashName(`Asistencia de #${TG.jbuf} para ${playerName(g, s.j)}`);
+  renderTagTab(); renderEdit();
+}
+function andOne() {
+  const g = cur(); const s = lastMadeShot(g, vt());
+  if (!s) { toast("No hay un tiro convertido", "warn"); return; }
+  pushUndo(g); s.d.and1 = !s.d.and1; TG.sel = s.id; touch(g); flashName(s.d.and1 ? "And-one marcado" : "And-one quitado"); renderTagTab(); renderEdit();
+}
+function highlightLast() {
+  const g = cur(); const e = g.events.find(x => x.id === TG.sel) || g.events[g.events.length - 1];
+  if (!e) return; pushUndo(g); e.hl = !e.hl; touch(g); flashName(e.hl ? "Marcada como destacada" : "Ya no es destacada"); renderTagTab(); renderEdit();
+}
+function undo() {
+  const g = cur(); const prev = TG.undo.pop();
+  if (!prev) { toast("Nada para deshacer"); return; }
+  g.events = JSON.parse(prev); TG.awaitLoc = null; touch(g); toast("Deshecho"); renderTagTab(); renderEdit(); drawTagCourt(); updateTagClock();
+}
+function deleteEvent(id) {
+  const g = cur(); const i = g.events.findIndex(e => e.id === id); if (i < 0) return;
+  pushUndo(g); g.events.splice(i, 1); if (TG.sel === id) TG.sel = null; if (TG.awaitLoc === id) TG.awaitLoc = null;
+  touch(g); toast("Jugada borrada (Ctrl+Z para recuperar)"); renderTagTab(); renderEdit(); drawTagCourt(); updateTagClock();
+}
+function renderTagTab() {
+  const g = cur(), box = $("#tagTab"); if (!box) return;
+  const tb = $(".tabs [data-tab='ev']"); if (tb) tb.textContent = `Jugadas (${g.events.length})`;
+  if (TG.tab === "ev") {
+    if (!g.events.length) { box.innerHTML = `<div class="empty small">Todavía no hay jugadas. Poné play, escribí la camiseta (ej. <kbd>1</kbd><kbd>0</kbd>), hacé clic donde tiró y apretá <kbd>A</kbd> si convirtió un doble.</div>`; return; }
+    const rows = [...g.events].reverse().map(e => `<div class="ev ${e.id === TG.sel ? "sel" : ""}" data-ev="${e.id}">
+      <span class="t">${fmtT(e.t)}</span><span class="small muted">${periodLabel(periodIdx(g, e.t))}</span>
+      <span style="font-weight:700">${e.team === "opp" ? "Rival" : e.j ? "#" + esc(e.j) : "Eq."}</span>
+      <span><span class="dot" style="background:${TYPE_COLOR[e.type]}"></span> ${esc(describe(g, e))}${e.hl ? " ★" : ""} ${e.type === "fg" && e.x == null ? `<span class="noloc">· sin ubicar</span>` : ""}</span>
+      <button class="btn sm ghost" data-del-ev="${e.id}" title="Borrar">✕</button></div>`).join("");
+    box.innerHTML = `<div class="evlist">${rows}</div>`;
+    $$("[data-ev]", box).forEach(r => r.onclick = ev => {
+      if (ev.target.closest("[data-del-ev]")) return;
+      TG.sel = r.dataset.ev; const e = g.events.find(x => x.id === TG.sel);
+      if (e && hasVideo()) seek(e.t - 1.5);
+      renderTagTab(); renderEdit(); drawTagCourt();
+    });
+    $$("[data-del-ev]", box).forEach(b => b.onclick = () => deleteEvent(b.dataset.delEv));
+    const sel = $(".ev.sel", box); if (sel) sel.scrollIntoView({ block: "nearest" });
+  } else if (TG.tab === "set") {
+    box.innerHTML = `<div class="pad grid" style="gap:14px">
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <label class="f">Equipo analizado<input class="inp" id="sUs" value="${esc(g.us.name)}"></label>
+        <label class="f">Color<input type="color" id="sUsC" value="${esc(g.us.color)}" style="height:40px;padding:3px"></label>
+        <label class="f">Rival<input class="inp" id="sOpp" value="${esc(g.opp.name)}"></label>
+        <label class="f">Color rival<input type="color" id="sOppC" value="${esc(g.opp.color)}" style="height:40px;padding:3px"></label>
+        <label class="f">Fecha<input type="date" id="sDate" value="${esc(g.date)}"></label>
+        <label class="f">Competencia<input id="sComp" value="${esc(g.comp)}"></label>
+      </div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:6px">Períodos (marcalos con el video en el momento justo)</div>
+        <div class="row">
+          <button class="btn sm" id="sStart">Inicio del partido aquí</button>
+          <button class="btn sm" id="sQEnd">Fin de período aquí</button>
+        </div>
+        <div class="marks" style="margin-top:8px">
+          ${g.start != null ? `<span class="mark">Inicio ${fmtT(g.start)}<button data-rm-start>✕</button></span>` : ""}
+          ${g.qEnd.map((q, i) => `<span class="mark">Fin ${periodLabel(i)} ${fmtT(q)}<button data-rm-q="${i}">✕</button></span>`).join("") || `<span class="small muted">Sin marcas: todo cuenta como Q1.</span>`}
+        </div>
+      </div>
+      <div class="row">
+        <span class="small" style="font-weight:600">En el 1er tiempo atacamos hacia:</span>
+        <div class="seg"><button data-dir="L" class="${g.dir === "L" ? "on" : ""}">← Izquierda</button><button data-dir="R" class="${g.dir === "R" ? "on" : ""}">Derecha →</button></div>
+        <label class="row small"><input type="checkbox" id="sFlip" ${g.flip ? "checked" : ""}> Se cambia de lado en el entretiempo</label>
+      </div>
+      <div class="row">
+        <span class="small" style="font-weight:600">Pedir ubicación en la cancha para:</span>
+        ${["fg", "reb", "to", "stl", "blk", "foul", "pass"].map(t => `<label class="row small" style="gap:4px"><input type="checkbox" data-loc="${t}" ${g.locFor.includes(t) ? "checked" : ""}>${TYPE_LABEL[t]}</label>`).join("")}
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <label class="f">Marcador oficial ${esc(g.us.name)} (opcional)<input type="number" min="0" id="sOffUs" value="${g.official?.us ?? ""}" placeholder="Se calcula de las jugadas"></label>
+        <label class="f">Marcador oficial ${esc(g.opp.name)} (opcional)<input type="number" min="0" id="sOffOpp" value="${g.official?.opp ?? ""}" placeholder="Se calcula de las jugadas"></label>
+      </div>
+      <label class="f">Link de YouTube del partido<input class="inp" id="sYt" value="${esc(g.ytUrl || (g.yt ? "https://youtu.be/" + g.yt : ""))}" placeholder="https://youtu.be/…"></label>
+      <div><div class="eyebrow" style="margin-bottom:6px">Sincronización del video</div>
+        <div class="row"><label class="f" style="width:170px">Desfase (segundos)<input class="inp" type="number" step="0.1" id="sOff" value="${g.vOffset || 0}"></label>
+        <button class="btn sm" id="sSync" ${TG.sel ? "" : "disabled"}>La jugada elegida ocurre ahora en el video</button></div>
+        <p class="small muted" style="margin:6px 0 0">Si las jugadas se ven corridas (por ejemplo, si tu archivo empieza antes o después que el original), elegí una jugada en la lista, llevá el video al momento exacto en que ocurre y tocá el botón.</p></div>
+      <label class="f">Plantel (número y nombre por línea)<textarea id="sRoster" rows="6">${esc(rosterTxt(g))}</textarea></label>
+    </div>`;
+    const upd = fn => () => { fn(); touch(g); };
+    $("#sUs").onchange = upd(() => g.us.name = $("#sUs").value.trim() || "Mi equipo");
+    $("#sUsC").onchange = upd(() => g.us.color = $("#sUsC").value);
+    $("#sOpp").onchange = upd(() => g.opp.name = $("#sOpp").value.trim() || "Rival");
+    $("#sOppC").onchange = upd(() => g.opp.color = $("#sOppC").value);
+    $("#sDate").onchange = upd(() => g.date = $("#sDate").value);
+    $("#sComp").onchange = upd(() => g.comp = $("#sComp").value.trim());
+    $("#sRoster").onchange = upd(() => g.roster = parseRoster($("#sRoster").value));
+    $("#sOff").onchange = upd(() => g.vOffset = r2(+$("#sOff").value || 0));
+    $("#sYt").onchange = () => { const v = $("#sYt").value.trim(); const id = ytIdFrom(v); if (v && !id) { toast("Ese link no parece de YouTube", "err"); return; } g.yt = id; g.ytUrl = v; touch(g); toast(id ? "Video de YouTube vinculado" : "Video de YouTube quitado"); renderTag(); };
+    $("#sSync").onclick = () => { const e = g.events.find(x => x.id === TG.sel); if (!e || !hasVideo()) { toast("Elegí una jugada y vinculá el video", "warn"); return; } g.vOffset = r2(P.time() - e.t); touch(g); renderTagTab(); toast(`Desfase ajustado a ${g.vOffset} s`); };
+    $("#sOffUs").onchange = upd(() => g.official.us = $("#sOffUs").value === "" ? null : +$("#sOffUs").value);
+    $("#sOffOpp").onchange = upd(() => g.official.opp = $("#sOffOpp").value === "" ? null : +$("#sOffOpp").value);
+    $("#sFlip").onchange = upd(() => g.flip = $("#sFlip").checked);
+    $$("[data-dir]", box).forEach(b => b.onclick = () => { g.dir = b.dataset.dir; touch(g); renderTagTab(); drawTagCourt(); updateTagClock(); });
+    $$("[data-loc]", box).forEach(c => c.onchange = () => { g.locFor = $$("[data-loc]", box).filter(x => x.checked).map(x => x.dataset.loc); touch(g); });
+    $("#sStart").onclick = () => { g.start = r2(vt()); touch(g); renderTagTab(); };
+    $("#sQEnd").onclick = () => { const t = r2(vt()); if (g.qEnd.some(q => Math.abs(q - t) < 2)) return; g.qEnd.push(t); g.qEnd.sort((a, b) => a - b); touch(g); renderTagTab(); updateTagClock(); toast(`Fin de período marcado en ${fmtT(t)}`); };
+    $$("[data-rm-q]", box).forEach(b => b.onclick = () => { g.qEnd.splice(+b.dataset.rmQ, 1); touch(g); renderTagTab(); });
+    const rs = $("[data-rm-start]", box); if (rs) rs.onclick = () => { g.start = null; touch(g); renderTagTab(); };
+  } else {
+    box.innerHTML = `<div class="pad"><p class="small muted" style="margin-top:0">La forma más rápida: <b>pausa → número → clic en la cancha → tecla</b>. La camiseta queda activa hasta que escribas otra. Las teclas no funcionan mientras escribís en un campo de texto.</p>
+      <div class="legend">${LEGEND.map(([k, l]) => `<div><kbd>${k}</kbd><span>${l}</span></div>`).join("")}</div></div>`;
+  }
+}
+function renderEdit() {
+  const g = cur(), box = $("#tEdit"); if (!box) return;
+  const e = g.events.find(x => x.id === TG.sel);
+  if (!e) { box.innerHTML = `<div class="pad small muted">Elegí una jugada de la lista para corregirla.</div>`; return; }
+  const d = e.d;
+  const sel = (id, opts, v) => `<select class="inp" id="${id}">${opts.map(o => `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+  let extra = "";
+  if (e.type === "fg") extra = `
+    <div class="two"><label class="f">Valor${sel("eP", [2, 3], d.pts)}</label><label class="f">Resultado${sel("eM", ["convertido", "errado"], d.made ? "convertido" : "errado")}</label></div>
+    <div class="two"><label class="f">Tipo de tiro${sel("eK", SHOT_KINDS, d.kind || "tiro")}</label><label class="f">Asistencia (camiseta)<input class="inp" id="eA" value="${esc(d.ast || "")}" maxlength="2"></label></div>
+    <div class="row small"><label class="row" style="gap:4px"><input type="checkbox" id="e1" ${d.and1 ? "checked" : ""}>And-one</label><label class="row" style="gap:4px"><input type="checkbox" id="eB" ${d.blkd ? "checked" : ""}>Le taparon el tiro</label></div>`;
+  else if (e.type === "ft") extra = `<label class="f">Resultado${sel("eM", ["convertido", "errado"], d.made ? "convertido" : "errado")}</label>`;
+  else if (e.type === "reb") extra = `<label class="f">Tipo${sel("eO", ["defensivo", "ofensivo"], d.off ? "ofensivo" : "defensivo")}</label>`;
+  else if (e.type === "to") extra = `<label class="f">Tipo de pérdida${sel("eT", TO_KINDS, d.kind || "perdida")}</label>`;
+  else if (e.type === "foul") extra = `<label class="f">Tipo de falta${sel("eF", FOUL_KINDS, d.kind || "personal")}</label>`;
+  else if (e.type === "pass") extra = `<label class="f">Resultado${sel("eM", ["completo", "errado"], d.ok ? "completo" : "errado")}</label>`;
+  else if (e.type === "opp") extra = `<label class="f">Puntos del rival${sel("eP", [1, 2, 3], d.pts)}</label>`;
+  box.innerHTML = `<div class="edit">
+    <div class="row" style="justify-content:space-between"><b>${esc(describe(g, e))}</b><span class="small muted">${fmtT(e.t)} · ${periodLabel(periodIdx(g, e.t))}</span></div>
+    ${e.team === "us" ? `<div class="two"><label class="f">Camiseta<input class="inp" id="eJ" value="${esc(e.j || "")}" maxlength="2"></label><label class="f">Tiempo (seg.)<input class="inp" type="number" step="0.1" id="eTm" value="${e.t}"></label></div>` : `<label class="f">Tiempo (seg.)<input class="inp" type="number" step="0.1" id="eTm" value="${e.t}"></label>`}
+    ${extra}
+    <div class="row">
+      <button class="btn sm" id="eNow">Usar tiempo actual</button>
+      ${e.type !== "opp" && e.type !== "ft" ? `<button class="btn sm" id="eLoc">${e.x == null ? "Ubicar en cancha" : "Reubicar"}</button>` : ""}
+      <button class="btn sm" id="eHl">${e.hl ? "★ Destacada" : "☆ Destacar"}</button>
+      <button class="btn sm" id="ePlay">▶ Ver</button>
+      <span style="flex:1"></span><button class="btn sm danger" id="eDel">Borrar</button>
+    </div></div>`;
+  const apply = fn => () => { pushUndo(g); fn(); touch(g); renderTagTab(); renderEdit(); drawTagCourt(); updateTagClock(); };
+  const on = (id, fn) => { const el = $("#" + id, box); if (el) el.onchange = apply(() => fn(el)); };
+  on("eJ", el => e.j = el.value.replace(/\D/g, "") || null);
+  on("eTm", el => { e.t = r2(+el.value || 0); sortEvents(g); });
+  on("eP", el => { d.pts = +el.value; checkShot(e); });
+  on("eM", el => { if (e.type === "pass") d.ok = el.value === "completo"; else d.made = el.value === "convertido"; });
+  on("eK", el => { d.kind = el.value; d.kindSet = true; });
+  on("eA", el => d.ast = el.value.replace(/\D/g, "") || null);
+  on("e1", el => d.and1 = el.checked);
+  on("eB", el => d.blkd = el.checked);
+  on("eO", el => d.off = el.value === "ofensivo");
+  on("eT", el => d.kind = el.value);
+  on("eF", el => d.kind = el.value);
+  $("#eNow", box).onclick = apply(() => { e.t = r2(vt()); sortEvents(g); });
+  $("#eHl", box).onclick = apply(() => e.hl = !e.hl);
+  $("#eDel", box).onclick = () => deleteEvent(e.id);
+  $("#ePlay", box).onclick = () => playClip(g, e);
+  const lb = $("#eLoc", box); if (lb) lb.onclick = () => { TG.relocate = true; drawTagCourt(); };
+}
+document.addEventListener("keydown", ev => {
+  if (route !== "etiquetar" || !cur()) return;
+  const tg = ev.target;
+  if (tg && (tg.closest("input,textarea,select,[contenteditable]") || $(".modal-bg"))) { if (ev.key === "Escape") tg.blur && tg.blur(); return; }
+  if (tg && tg.tagName === "BUTTON") tg.blur();
+  const k = ev.key, lk = k.length === 1 ? k.toLowerCase() : k;
+  if (ev.ctrlKey || ev.metaKey) { if (lk === "z") { ev.preventDefault(); undo(); } return; }
+  if (ev.altKey) return;
+  if (k === " ") { ev.preventDefault(); togglePlay(); return; }
+  if (k === "ArrowLeft" || k === "ArrowRight") { ev.preventDefault(); seek(vt() + (k === "ArrowLeft" ? -1 : 1) * (ev.shiftKey ? 10 : 2)); return; }
+  if (k === ",") { seek(vt() - 0.5); return; }
+  if (k === ".") { seek(vt() + 0.5); return; }
+  if (k === "[" || k === "]") {
+    if (!hasVideo()) return; const rates = P.rates(); let i = rates.indexOf(P.rate()); if (i < 0) i = rates.indexOf(1);
+    i = clamp(i + (k === "]" ? 1 : -1), 0, rates.length - 1); P.rate(rates[i]); if ($("#tRate")) $("#tRate").value = String(rates[i]); toast(`Velocidad ${rates[i]}×`); return;
+  }
+  if (/^[0-9]$/.test(k)) {
+    const now = Date.now();
+    TG.jbuf = (now - TG.lastDigit < 1300 && TG.jbuf.length < 2) ? TG.jbuf + k : k;
+    TG.lastDigit = now; $("#tJ").textContent = "#" + TG.jbuf; updateTagClock(); return;
+  }
+  if (k === "Backspace") { ev.preventDefault(); TG.jbuf = ""; $("#tJ").textContent = "—"; updateTagClock(); return; }
+  if (k === "Escape") { TG.pending = null; TG.awaitLoc = null; TG.relocate = false; drawTagCourt(); return; }
+  if (k === "Delete") { if (TG.sel) deleteEvent(TG.sel); return; }
+  if (KEYS[lk]) { ev.preventDefault(); addFromKey(KEYS[lk]); return; }
+  if (lk === "v") { ev.preventDefault(); assist(); return; }
+  if (lk === "n") { ev.preventDefault(); andOne(); return; }
+  if (lk === "h") { ev.preventDefault(); highlightLast(); return; }
+});
+
+/* ============================================================
+   ANÁLISIS
+   ============================================================ */
+const GV = { res: "all", per: "all", cat: "tiros", player: "", nowId: null, chat: [], aiBusy: false, coachBusy: false, ctl: null };
+const CATS = [
+  ["tiros", "Tiros", e => e.type === "fg"], ["triples", "Triples", e => e.type === "fg" && e.d.pts === 3],
+  ["dobles", "Dobles", e => e.type === "fg" && e.d.pts === 2], ["cerca", "Bandejas y volcadas", e => e.type === "fg" && ["bandeja", "volcada", "palomita"].includes(e.d.kind)],
+  ["libres", "Libres", e => e.type === "ft"], ["asist", "Asistencias", e => e.type === "fg" && e.d.made && !!e.d.ast],
+  ["reb", "Rebotes", e => e.type === "reb"], ["rebof", "Reb. ofensivos", e => e.type === "reb" && e.d.off], ["rebdef", "Reb. defensivos", e => e.type === "reb" && !e.d.off],
+  ["perd", "Pérdidas", e => e.type === "to"], ["robos", "Robos", e => e.type === "stl"], ["tapas", "Tapas", e => e.type === "blk"],
+  ["faltas", "Faltas", e => e.type === "foul"], ["pases", "Pases", e => e.type === "pass"], ["dest", "Destacadas", e => !!e.hl],
+  ["rival", "Puntos rival", e => e.type === "opp"]
+];
+function inPer(g, e, per) {
+  if (per === "all") return true; const p = periodIdx(g, e.t);
+  if (per === "h1") return p < 2; if (per === "h2") return p >= 2;
+  return p === +per.slice(1);
+}
+function matchPl(e, cat, pl) { if (!pl) return true; if (cat === "asist") return String(e.d.ast) === pl; return e.j === pl; }
+function filtered(g, cat = GV.cat) {
+  const c = CATS.find(x => x[0] === cat) || CATS[0];
+  return g.events.filter(e => c[2](e) && inPer(g, e, GV.per) && matchPl(e, cat, GV.player) && (GV.res === "all" || (GV.res === "ok" ? success(e) : !success(e))));
+}
+function renderGame() {
+  const g = cur(); if (!g) return go("inicio");
+  const st = computeStats(g), sc = scoreOf(g), T = st.team;
+  const res = sc.us > sc.opp ? "w" : sc.us < sc.opp ? "l" : "d";
+  const nP = byPeriod(g).n;
+  const players = sortedRosterJs(g, st);
+  $("#app").innerHTML = `
+  ${S.viewer ? "" : `<div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn" data-go="etiquetar">Etiquetar</button><button class="btn dark" id="shareBtn">${g.public ? "Compartido ✓" : "Compartir"}</button></div>`}
+  <section class="card ghead">
+    <div class="top-part">
+      <div class="team">${badge(g.us)}<div><div class="tname" style="font-size:22px">${esc(g.us.name)}</div><span class="pill ${res}">${res === "w" ? "Victoria" : res === "l" ? "Derrota" : "Empate"}</span></div></div>
+      <div style="text-align:center"><div class="eyebrow">${esc(g.date)}${g.comp ? " · " + esc(g.comp) : ""}</div>
+        <div class="bigscore"><span class="${sc.us < sc.opp ? "lo" : ""}">${sc.us}</span><span class="muted" style="font-size:.5em">–</span><span class="${sc.opp < sc.us ? "lo" : ""}">${sc.opp}</span></div>
+        ${(g.official.us != null && g.official.us !== sc.taggedUs) || (g.official.opp != null && g.official.opp !== sc.taggedOpp) ? `<div class="small muted">Etiquetado: ${sc.taggedUs} – ${sc.taggedOpp}</div>` : ""}</div>
+      <div class="team r"><div><div class="tname" style="font-size:22px">${esc(g.opp.name)}</div>${g.demo ? `<span class="pill d">Partido de ejemplo</span>` : ""}</div>${badge(g.opp)}</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="eyebrow">Puntos</div><div class="v">${T.pts}</div><div class="s">${T.fgm} TC · ${T.ftm} TL</div></div>
+      <div class="kpi"><div class="eyebrow">Tiros de campo</div><div class="v">${pct(T.fgm, T.fga)}%</div><div class="s">${T.fgm}/${T.fga} · 3P ${T.p3m}/${T.p3a}</div></div>
+      <div class="kpi"><div class="eyebrow">Tiro verdadero</div><div class="v">${T.ts}%</div><div class="s">eFG ${T.efg}% · TL ${pct(T.ftm, T.fta)}%</div></div>
+      <div class="kpi"><div class="eyebrow">Rebotes</div><div class="v">${T.reb}</div><div class="s">${T.oreb} of · ${T.dreb} def</div></div>
+      <div class="kpi"><div class="eyebrow">Asistencias</div><div class="v">${T.ast}</div><div class="s">${T.to} pérdidas · ${T.stl} robos</div></div>
+      <div class="kpi"><div class="eyebrow">Puntos por posesión</div><div class="v">${T.ppp.toFixed(2)}</div><div class="s">~${T.poss} posesiones</div></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="fv">
+      <div class="fv-left">
+        <div class="sec-title"><h2>Vista de cancha</h2><span class="small muted">Sólido = bien · Punteado = mal · Clic = ver jugada</span></div>
+        <div class="court-wrap" id="gCourt"></div>
+        <div style="margin-top:12px"><div class="vbox" id="gVideo"></div>
+          <div class="row" style="margin-top:8px;justify-content:space-between">
+            <div class="small" id="gNow" style="font-weight:600">${hasVideo() ? "Elegí una jugada o reproducí la selección" : ""}</div>
+            <div class="row"><button class="btn sm" id="gPrev">◀︎</button><button class="btn sm pri" id="gPlayAll">▶ Reproducir selección</button><button class="btn sm" id="gNext">▶︎</button></div>
+          </div></div>
+      </div>
+      <div class="fv-right">
+        <div class="row">
+          <select class="inp" id="fRes"><option value="all">Todos los resultados</option><option value="ok">Solo aciertos</option><option value="bad">Solo fallos</option></select>
+          <select class="inp" id="fPer"><option value="all">Partido completo</option><option value="h1">1er tiempo</option><option value="h2">2do tiempo</option>
+            ${Array.from({ length: nP }, (_, i) => `<option value="q${i}">${periodLabel(i)}</option>`).join("")}</select>
+        </div>
+        <select class="inp" id="fPl"><option value="">Todos los jugadores (${players.length})</option>${players.map(j => `<option value="${esc(j)}">${esc(playerName(g, j))}</option>`).join("")}</select>
+        <div><div class="eyebrow" style="margin-bottom:6px">Estadística</div><div class="chips" id="fCats"></div></div>
+        <div class="eyebrow" id="fCount"></div>
+        <div class="clips" id="fClips"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="pad" style="padding-bottom:8px"><div class="sec-title"><h2>Box score</h2><span class="small muted">Clic en un jugador para filtrar todo el análisis</span></div></div>
+    <div class="scroll-x" id="gBox"></div>
+  </section>
+
+  <section class="two-col" style="margin-top:16px">
+    <div class="card pad"><div class="sec-title"><h2>Evolución del marcador</h2></div><div id="gRace" style="position:relative"></div><div id="gQuarters" class="scroll-x" style="margin-top:10px"></div></div>
+    <div class="card pad"><div class="sec-title"><h2>Impacto por jugador</h2><span class="small muted">Acciones positivas</span></div>
+      <div class="row small" style="margin-bottom:6px"><span><span class="dot" style="background:#e8641b"></span> Ataque</span><span><span class="dot" style="background:#2463c9"></span> Generación</span><span><span class="dot" style="background:#1f8a4c"></span> Defensa</span></div>
+      <div class="bars" id="gImpact"></div></div>
+  </section>
+
+  <section class="two-col" style="margin-top:16px">
+    <div class="card pad"><div class="sec-title"><h2>Mapa de tiros</h2><span class="small muted" id="gShotSub"></span></div><div id="gShots"></div><div id="gZones" class="scroll-x" style="margin-top:10px"></div></div>
+    <div class="card pad"><div class="sec-title"><h2>Mapa de calor</h2><span class="small muted" id="gHeatSub"></span></div><div id="gHeat"></div>
+      <p class="small muted" style="margin-bottom:0">Dónde estuvo activo ${GV.player ? esc(playerName(g, GV.player)) : "el equipo"}. Atacando siempre hacia la derecha.</p></div>
+  </section>
+
+  <section class="card pad" style="margin-top:16px"><div class="sec-title"><h2>Mejores momentos</h2><button class="btn sm pri" id="hlAll">▶ Reproducir todos</button></div><div class="hl" id="gHl"></div></section>
+
+  <section class="two-col" style="margin-top:16px">
+    <div class="card pad" id="aiCard"></div>
+    <div class="card pad" id="coachCard"></div>
+  </section>
+
+  <section class="card pad" style="margin-top:16px"><div class="sec-title"><h2>Exportar</h2></div>
+    <div class="row">${S.viewer ? "" : `<button class="btn" id="xJson">Respaldo completo (.json)</button>`}<button class="btn" id="xEv">Jugadas (.csv)</button><button class="btn" id="xBox">Box score (.csv)</button>${S.viewer ? "" : `<button class="btn" data-go="etiquetar">Seguir etiquetando</button>`}</div>
+    <p class="small muted" style="margin-bottom:0">El respaldo incluye todas las jugadas y se puede volver a importar en otra computadora. El video no se incluye.</p></section>`;
+  $("#fRes").value = GV.res; $("#fPer").value = GV.per; $("#fPl").value = GV.player;
+  $("#fRes").onchange = e => { GV.res = e.target.value; drawField(); };
+  $("#fPer").onchange = e => { GV.per = e.target.value; drawField(); drawShots(); drawHeat(); };
+  $("#fPl").onchange = e => { setPlayer(e.target.value); };
+  mountVideo($("#gVideo"));
+  V.onClip = e => { GV.nowId = e ? e.id : null; const el = $("#gNow"); if (el) el.textContent = e ? `${V.playlist ? `(${V.idx + 1}/${V.playlist.length}) ` : ""}${fmtT(e.t)} · ${e.team === "opp" ? g.opp.name : playerName(g, e.j)} · ${describe(g, e)}` : "Fin de la selección"; $$(".clip").forEach(c => c.classList.toggle("now", c.dataset.clip === GV.nowId)); };
+  $("#gPlayAll").onclick = () => playList(g, filtered(g));
+  $("#gPrev").onclick = () => V.playlist ? nextInList(-1) : null;
+  $("#gNext").onclick = () => V.playlist ? nextInList(1) : null;
+  if ($("#xJson")) $("#xJson").onclick = () => exportJSON(g);
+  if ($("#shareBtn")) $("#shareBtn").onclick = () => shareDialog(g);
+  $("#xEv").onclick = () => exportEventsCSV(g);
+  $("#xBox").onclick = () => exportBoxCSV(g);
+  drawField(); drawBox(); drawRace(); drawImpact(); drawShots(); drawHeat(); drawHighlights(); drawAI(); drawCoach();
+}
+function setPlayer(j) {
+  GV.player = j || "";
+  if ($("#fPl")) $("#fPl").value = GV.player;
+  drawField(); drawBox(); drawShots(); drawHeat(); drawImpact();
+  const p = $("#gHeat")?.nextElementSibling; if (p) p.textContent = `Dónde estuvo activo ${GV.player ? playerName(cur(), GV.player) : "el equipo"}. Atacando siempre hacia la derecha.`;
+}
+function drawField() {
+  const g = cur(); if (!$("#gCourt")) return;
+  // chips con conteos (respetan período, resultado y jugador)
+  $("#fCats").innerHTML = CATS.map(([k, l]) => { const n = filtered(g, k).length; return `<button class="chip ${GV.cat === k ? "on" : ""} ${n ? "" : "zero"}" data-cat="${k}">${l} <b>${n}</b></button>`; }).join("");
+  $$("#fCats [data-cat]").forEach(b => b.onclick = () => { GV.cat = b.dataset.cat; drawField(); });
+  const list = filtered(g);
+  let inner = "";
+  for (const e of list) {
+    if (e.x == null) continue;
+    const [mx, my] = toM(e.x, e.y), ok = success(e);
+    if (e.type === "fg") {
+      const dx = RIM_X - mx, dy = RIM_Y - my, L = Math.hypot(dx, dy) || 1, ex = RIM_X - dx / L * 0.35, ey = RIM_Y - dy / L * 0.35;
+      inner += `<g class="ev-mark" data-e="${e.id}" style="cursor:pointer"><line x1="${mx}" y1="${my}" x2="${ex}" y2="${ey}" stroke="${ok ? "#1d6b3e" : "#5b6475"}" stroke-width="${ok ? .09 : .07}" ${ok ? "" : `stroke-dasharray=".25 .18"`} marker-end="url(#${ok ? "arr-ok" : "arr-bad"})" opacity=".9"/>
+        <circle cx="${mx}" cy="${my}" r=".26" fill="${ok ? "#1d6b3e" : "#fff"}" stroke="${ok ? "#fff" : "#5b6475"}" stroke-width=".07"/><circle cx="${mx}" cy="${my}" r=".6" fill="transparent"/></g>`;
+    } else {
+      inner += `<g class="ev-mark" data-e="${e.id}" style="cursor:pointer"><circle cx="${mx}" cy="${my}" r=".3" fill="${ok ? TYPE_COLOR[e.type] : "#fff"}" stroke="${ok ? "#fff" : TYPE_COLOR[e.type]}" stroke-width=".08" ${ok ? "" : `stroke-dasharray=".15 .1"`}/><circle cx="${mx}" cy="${my}" r=".6" fill="transparent"/></g>`;
+    }
+  }
+  $("#gCourt").innerHTML = courtSVG({ cls: "court", inner }) + `<div class="tip hidden" id="gTip"></div>`;
+  const tip = $("#gTip");
+  $$("#gCourt .ev-mark").forEach(m => {
+    const e = g.events.find(x => x.id === m.dataset.e);
+    m.addEventListener("click", () => playClip(g, e));
+    m.addEventListener("mouseenter", () => { tip.textContent = `${fmtT(e.t)} · ${playerName(g, e.j)} · ${describe(g, e)}`; tip.classList.remove("hidden"); });
+    m.addEventListener("mousemove", ev => { const r = $("#gCourt").getBoundingClientRect(); tip.style.left = (ev.clientX - r.left) + "px"; tip.style.top = (ev.clientY - r.top) + "px"; });
+    m.addEventListener("mouseleave", () => tip.classList.add("hidden"));
+  });
+  const located = list.filter(e => e.x != null).length;
+  const okN = list.filter(success).length;
+  $("#fCount").textContent = `${list.length} jugadas · ${okN} bien${list.length - located ? ` · ${list.length - located} sin ubicación` : ""}`;
+  $("#fClips").innerHTML = list.length ? list.map(e => `<div class="clip ${e.id === GV.nowId ? "now" : ""}" data-clip="${e.id}"><span class="num muted">${fmtT(e.t)}</span><span class="small muted">${periodLabel(periodIdx(g, e.t))}</span><b>${e.team === "opp" ? "Riv." : e.j ? "#" + esc(e.j) : "Eq."}</b><span>${esc(describe(g, e))}${e.hl ? " ★" : ""}</span>${g.yt ? `<a class="yt-a" href="${ytLink(g, clipStart(e))}" target="_blank" rel="noopener" title="Abrir en YouTube en este momento">↗ YT</a>` : "<span></span>"}</div>`).join("") : `<div class="empty small">Sin jugadas con estos filtros</div>`;
+  $$("#fClips [data-clip]").forEach(c => c.onclick = ev => { if (ev.target.closest(".yt-a")) return; playClip(g, g.events.find(x => x.id === c.dataset.clip)); });
+}
+function drawBox() {
+  const g = cur(), st = computeStats(g); if (!$("#gBox")) return;
+  const js = sortedRosterJs(g, st);
+  const cell = (s) => `<td>${s.pts}</td><td>${s.fgm}-${s.fga}</td><td>${pct(s.fgm, s.fga)}%</td><td>${s.p3m}-${s.p3a}</td><td>${s.ftm}-${s.fta}</td><td>${s.oreb}</td><td>${s.dreb}</td><td><b>${s.reb}</b></td><td>${s.ast}</td><td>${s.to}</td><td>${s.stl}</td><td>${s.blk}</td><td>${s.pf}</td><td>${s.passOk}/${s.pass}</td><td><b>${s.val}</b></td>`;
+  $("#gBox").innerHTML = `<table class="box"><thead><tr><th>Jugador</th><th>PTS</th><th>TC</th><th>TC%</th><th>3P</th><th>TL</th><th>RO</th><th>RD</th><th>REB</th><th>AST</th><th>PÉR</th><th>ROB</th><th>TAP</th><th>FAL</th><th>PASES</th><th>VAL</th></tr></thead><tbody>
+    ${js.map(j => `<tr class="pl ${GV.player === j ? "on" : ""}" data-pl="${esc(j)}"><td>${esc(playerName(g, j))}</td>${cell(st.pl[j] || line())}</tr>`).join("")}
+    <tr class="tot"><td>Total equipo</td>${cell(st.team)}</tr></tbody></table>`;
+  $$("#gBox [data-pl]").forEach(r => r.onclick = () => setPlayer(GV.player === r.dataset.pl ? "" : r.dataset.pl));
+}
+function drawRace() {
+  const g = cur(), el = $("#gRace"); if (!el) return;
+  const pts = pointsTimeline(g);
+  const evT = g.events.map(e => e.t);
+  const t0 = g.start ?? (evT.length ? Math.max(0, Math.min(...evT) - 20) : 0);
+  const t1 = Math.max(t0 + 60, g.qEnd.length >= 4 ? Math.max(g.qEnd[g.qEnd.length - 1], ...evT) : (evT.length ? Math.max(...evT) + 20 : 60));
+  let us = 0, op = 0; const su = [[t0, 0]], so = [[t0, 0]];
+  for (const p of pts) { if (p.side === "us") { su.push([p.t, us]); us += p.v; su.push([p.t, us]); } else { so.push([p.t, op]); op += p.v; so.push([p.t, op]); } }
+  su.push([t1, us]); so.push([t1, op]);
+  const W = 600, H = 230, pl = 34, pr = 12, pt = 12, pb = 28, maxY = Math.max(10, us, op) * 1.08;
+  const X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr), Y = v => H - pb - v / maxY * (H - pt - pb);
+  const path = arr => arr.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join("");
+  const ticks = [0, Math.round(maxY / 2 / 5) * 5, Math.round(maxY / 1.08)].filter((v, i, a) => a.indexOf(v) === i);
+  const usC = g.us.color.toLowerCase() === "#ffffff" ? "#e8641b" : g.us.color, opC = g.opp.color.toLowerCase() === "#ffffff" ? "#4a5568" : g.opp.color;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
+    ${ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e2ddd1"/><text x="${pl - 6}" y="${Y(v) + 4}" font-size="11" text-anchor="end" fill="#6c6a64">${v}</text>`).join("")}
+    ${g.qEnd.filter(q => q > t0 && q < t1).map((q, i) => `<line x1="${X(q)}" x2="${X(q)}" y1="${pt}" y2="${H - pb}" stroke="#bdb5a3" stroke-dasharray="3 3"/><text x="${X(q)}" y="${H - 10}" font-size="10.5" text-anchor="middle" fill="#6c6a64">${i === 1 ? "ENTRETIEMPO" : "FIN " + periodLabel(i)}</text>`).join("")}
+    <path d="${path(so)}" fill="none" stroke="${opC}" stroke-width="2.2" opacity=".8"/>
+    <path d="${path(su)}" fill="none" stroke="${usC}" stroke-width="2.6"/>
+    <text x="${W - pr}" y="${Y(us) - 6}" font-size="13" font-weight="700" text-anchor="end" fill="${usC}">${esc(g.us.name)} ${us}</text>
+    <text x="${W - pr}" y="${Y(op) + (Math.abs(Y(op) - Y(us)) < 16 ? 18 : -6)}" font-size="13" font-weight="700" text-anchor="end" fill="${opC}">${esc(g.opp.name)} ${op}</text>
+    <line id="raceLine" x1="0" x2="0" y1="${pt}" y2="${H - pb}" stroke="#1b1c1e" opacity="0"/>
+    <rect x="${pl}" y="${pt}" width="${W - pl - pr}" height="${H - pt - pb}" fill="transparent" id="raceHit"/>
+  </svg><div class="tip hidden" id="raceTip"></div>`;
+  const svg = el.querySelector("svg"), tip = $("#raceTip"), ln = $("#raceLine");
+  $("#raceHit").addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W;
+    const t = t0 + (x - pl) / (W - pl - pr) * (t1 - t0);
+    const s = scoreAt(g, t);
+    ln.setAttribute("x1", x); ln.setAttribute("x2", x); ln.setAttribute("opacity", ".3");
+    tip.textContent = `${periodLabel(periodIdx(g, t))} · ${fmtT(t)} — ${s.us} a ${s.opp}`; tip.classList.remove("hidden");
+    tip.style.left = (ev.clientX - r.left) + "px"; tip.style.top = (ev.clientY - r.top) + "px";
+  });
+  $("#raceHit").addEventListener("mouseleave", () => { tip.classList.add("hidden"); ln.setAttribute("opacity", "0"); });
+  $("#raceHit").addEventListener("click", ev => {
+    const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W;
+    if (hasVideo()) { seek(t0 + (x - pl) / (W - pl - pr) * (t1 - t0)); P.play(); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); }
+  });
+  const bp = byPeriod(g);
+  $("#gQuarters").innerHTML = `<table class="box"><thead><tr><th>Equipo</th>${Array.from({ length: bp.n }, (_, i) => `<th>${periodLabel(i)}</th>`).join("")}<th>Total</th></tr></thead><tbody>
+    <tr><td>${esc(g.us.name)}</td>${bp.us.map(v => `<td>${v}</td>`).join("")}<td><b>${bp.us.reduce((a, b) => a + b, 0)}</b></td></tr>
+    <tr><td>${esc(g.opp.name)}</td>${bp.opp.map(v => `<td>${v}</td>`).join("")}<td><b>${bp.opp.reduce((a, b) => a + b, 0)}</b></td></tr></tbody></table>
+    ${g.qEnd.length < 3 ? `<p class="small muted">Marcá los finales de período en “Etiquetar → Partido y plantel” para separar por cuartos.</p>` : ""}`;
+}
+function drawImpact() {
+  const g = cur(), el = $("#gImpact"); if (!el) return;
+  const st = computeStats(g);
+  const rows = Object.entries(st.pl).filter(([j]) => j).sort((a, b) => b[1].pos - a[1].pos);
+  const max = Math.max(1, ...rows.map(r => r[1].pos));
+  el.innerHTML = rows.length ? rows.map(([j, s], i) => `<div class="b" data-pl="${esc(j)}" style="${GV.player && GV.player !== j ? "opacity:.45" : ""}">
+    <span class="num muted">${i + 1}</span><span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(playerName(g, j))}</span>
+    <div class="track" style="width:${Math.max(4, s.pos / max * 100)}%"><span style="width:${pct(s.atk, s.pos)}%;background:#e8641b"></span><span style="width:${pct(s.gen, s.pos)}%;background:#2463c9"></span><span style="width:${pct(s.def, s.pos)}%;background:#1f8a4c"></span></div>
+    <b class="num" style="font-size:18px">${s.pos}</b></div>`).join("") + `<p class="small muted" style="margin-bottom:0">Ataque: tiros y libres convertidos, rebotes ofensivos. Generación: asistencias y pases completos. Defensa: rebotes defensivos, robos y tapas.</p>` : `<div class="empty small">Sin jugadas de jugadores todavía</div>`;
+  $$("#gImpact [data-pl]").forEach(r => r.onclick = () => setPlayer(GV.player === r.dataset.pl ? "" : r.dataset.pl));
+}
+function drawShots() {
+  const g = cur(), el = $("#gShots"); if (!el) return;
+  const shots = g.events.filter(e => e.type === "fg" && e.x != null && inPer(g, e, GV.per) && (!GV.player || e.j === GV.player));
+  let inner = shots.map(e => { const [mx, my] = toM(e.x, e.y); return e.d.made ? `<circle cx="${mx}" cy="${my}" r=".28" fill="#1d6b3e" stroke="#fff" stroke-width=".06"/>` : `<g stroke="#2a2d33" stroke-width=".09"><line x1="${mx - .2}" y1="${my - .2}" x2="${mx + .2}" y2="${my + .2}"/><line x1="${mx - .2}" y1="${my + .2}" x2="${mx + .2}" y2="${my - .2}"/></g>`; }).join("");
+  el.innerHTML = courtSVG({ cls: "court", half: true, inner }).replace('class="court"', 'class="court" style="cursor:default"');
+  const made = shots.filter(e => e.d.made).length;
+  $("#gShotSub").textContent = `${made}/${shots.length} · ${pct(made, shots.length)}% · ● convertido ✕ errado`;
+  const z = {}; for (const e of shots) { const k = zoneOf(e.x, e.y); (z[k] ??= { m: 0, a: 0, p: 0 }); z[k].a++; if (e.d.made) { z[k].m++; z[k].p += e.d.pts; } }
+  const order = ["pintura", "media", "t3", "c3izq", "c3der", "back"].filter(k => z[k]);
+  $("#gZones").innerHTML = order.length ? `<table class="box zones"><thead><tr><th>Zona</th><th>Conv.</th><th>%</th><th>Pts/tiro</th><th>Del total</th></tr></thead><tbody>
+    ${order.map(k => `<tr><td>${ZONES[k]}</td><td>${z[k].m}/${z[k].a}</td><td>${pct(z[k].m, z[k].a)}%</td><td>${(z[k].p / z[k].a).toFixed(2)}</td><td>${pct(z[k].a, shots.length)}%</td></tr>`).join("")}</tbody></table>` : `<p class="small muted">Sin tiros ubicados con estos filtros.</p>`;
+}
+function drawHeat() {
+  const g = cur(), el = $("#gHeat"); if (!el) return;
+  const evs = g.events.filter(e => e.team === "us" && e.x != null && e.type !== "ft" && inPer(g, e, GV.per) && (!GV.player || e.j === GV.player || (e.type === "fg" && String(e.d.ast) === GV.player)));
+  const NX = 28, NY = 15, grid = Array.from({ length: NX * NY }, () => 0);
+  for (const e of evs) { const [mx, my] = toM(e.x, e.y); for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) { const gx = Math.floor(mx) + dx, gy = Math.floor(my) + dy; if (gx < 0 || gy < 0 || gx >= NX || gy >= NY) continue; const w = Math.exp(-(dx * dx + dy * dy) / 2.2); grid[gy * NX + gx] += w; } }
+  const max = Math.max(0.0001, ...grid);
+  let inner = "";
+  grid.forEach((v, i) => { if (v / max < 0.06) return; const x = i % NX, y = Math.floor(i / NX), a = v / max; const hue = 50 - a * 50; inner += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="hsl(${hue},95%,${52 - a * 10}%)" opacity="${(0.25 + a * 0.6).toFixed(2)}"/>`; });
+  el.innerHTML = courtSVG({ cls: "court", inner }).replace('class="court"', 'class="court" style="cursor:default"');
+  $("#gHeatSub").textContent = `${evs.length} acciones`;
+}
+function highlightList(g) {
+  return g.events.filter(e => e.hl || (e.type === "fg" && e.d.made && (e.d.pts === 3 || e.d.and1 || e.d.kind === "volcada")) || e.type === "blk").sort((a, b) => a.t - b.t);
+}
+function drawHighlights() {
+  const g = cur(), el = $("#gHl"); if (!el) return;
+  const list = highlightList(g);
+  el.innerHTML = list.length ? list.map(e => `<button data-h="${e.id}"><span class="small muted">${periodLabel(periodIdx(g, e.t))} · ${fmtT(e.t)}</span><b>${esc(playerName(g, e.j))}</b><span class="small">${esc(describe(g, e))}${e.hl ? " ★" : ""}</span></button>`).join("") : `<div class="empty small">Triples, and-ones, volcadas, tapas y jugadas marcadas con ★ aparecen acá.</div>`;
+  $$("#gHl [data-h]").forEach(b => b.onclick = () => { playClip(g, g.events.find(x => x.id === b.dataset.h)); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); });
+  $("#hlAll").onclick = () => { playList(g, list); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); };
+}
+
+/* ---------- IA ---------- */
+function gameDigest(g) {
+  const st = computeStats(g), sc = scoreOf(g), bp = byPeriod(g);
+  const T = st.team;
+  const pls = Object.entries(st.pl).filter(([j]) => j).map(([j, s]) => ({ jugador: playerName(g, j), pts: s.pts, tc: `${s.fgm}/${s.fga}`, triples: `${s.p3m}/${s.p3a}`, libres: `${s.ftm}/${s.fta}`, reb: s.reb, ast: s.ast, perdidas: s.to, robos: s.stl, tapas: s.blk, faltas: s.pf, valoracion: s.val })).sort((a, b) => b.valoracion - a.valoracion);
+  const shots = g.events.filter(e => e.type === "fg" && e.x != null); const z = {};
+  for (const e of shots) { const k = ZONES[zoneOf(e.x, e.y)]; (z[k] ??= { conv: 0, int: 0 }); z[k].int++; if (e.d.made) z[k].conv++; }
+  const toKinds = {}; g.events.filter(e => e.type === "to").forEach(e => toKinds[e.d.kind || "perdida"] = (toKinds[e.d.kind || "perdida"] || 0) + 1);
+  return {
+    partido: `${g.us.name} ${sc.us} - ${sc.opp} ${g.opp.name}`, fecha: g.date, competencia: g.comp || null,
+    nota: "Solo se etiquetan en detalle las acciones de " + g.us.name + "; del rival solo sus puntos.",
+    por_periodo: Array.from({ length: bp.n }, (_, i) => ({ periodo: periodLabel(i), [g.us.name]: bp.us[i], [g.opp.name]: bp.opp[i] })),
+    equipo: { pts: T.pts, tc: `${T.fgm}/${T.fga} (${pct(T.fgm, T.fga)}%)`, dobles: `${T.p2m}/${T.p2a}`, triples: `${T.p3m}/${T.p3a}`, libres: `${T.ftm}/${T.fta}`, tiro_verdadero: T.ts + "%", reb_of: T.oreb, reb_def: T.dreb, ast: T.ast, perdidas: T.to, robos: T.stl, tapas: T.blk, faltas: T.pf, posesiones_aprox: T.poss, puntos_por_posesion: +T.ppp.toFixed(2) },
+    tiro_por_zona: z, tipos_de_perdida: toKinds, jugadores: pls
+  };
+}
+function drawAI() {
+  const g = cur(), el = $("#aiCard"); if (!el) return;
+  const ai = g.ai;
+  if (S.viewer && !ai) { el.classList.add("hidden"); return; }
+  el.innerHTML = `<div class="sec-title"><h2>Informe con IA</h2>${S.sample && !S.viewer ? `<button class="btn sm ${ai ? "" : "pri"}" id="aiGo" ${GV.aiBusy ? "disabled" : ""}>${GV.aiBusy ? "Generando…" : ai ? "Regenerar" : "Generar informe"}</button>` : ""}</div>
+    <div id="aiOut">${ai ? aiHTML(g, ai) : `<p class="muted small">${S.sample ? "Un resumen del partido escrito a partir de las estadísticas: claves, aspectos a mejorar y figura del partido." : "El informe con IA está disponible cuando abrís esta página dentro de Claude."}</p>`}</div>`;
+  const b = $("#aiGo"); if (b) b.onclick = runAI;
+}
+function aiHTML(g, ai) {
+  const li = a => (a || []).map(x => `<li>${esc(x)}</li>`).join("");
+  return `<h3>${esc(ai.titulo || "")}</h3><p style="margin-top:0">${esc(ai.resumen || "")}</p>
+    ${ai.claves?.length ? `<div class="eyebrow" style="margin-top:10px">Claves del partido</div><ul>${li(ai.claves)}</ul>` : ""}
+    ${ai.a_mejorar?.length ? `<div class="eyebrow" style="margin-top:10px">A mejorar</div><ul>${li(ai.a_mejorar)}</ul>` : ""}
+    ${ai.figura ? `<div class="eyebrow" style="margin-top:10px">Figura</div><p style="margin:4px 0 0"><b>${esc(ai.figura.jugador || "")}</b> — ${esc(ai.figura.motivo || "")}</p>` : ""}
+    <p class="small muted" style="margin-bottom:0">Generado ${new Date(ai.at || Date.now()).toLocaleString("es-AR")}. Basado solo en lo etiquetado.</p>`;
+}
+async function runAI() {
+  const g = cur(); if (!S.sample || GV.aiBusy) return;
+  GV.aiBusy = true; drawAI(); $("#aiOut").innerHTML = `<p class="muted">Analizando el partido…</p>`;
+  const prompt = `Sos analista de básquet. Escribí en español rioplatense, tono profesional para un cuerpo técnico, un informe breve del partido a partir de estos datos etiquetados del video. Usá números concretos de los datos, no inventes nada que no esté en ellos (por ejemplo, no hay datos individuales del rival salvo sus puntos).
+
+Datos:
+${JSON.stringify(gameDigest(g))}
+
+Respondé SOLO con JSON con esta forma:
+{"titulo":"titular corto","resumen":"3 a 4 oraciones","claves":["3 a 4 puntos concretos"],"a_mejorar":["2 a 3 puntos concretos"],"figura":{"jugador":"#10 Nombre","motivo":"una oración con sus números"}}`;
+  try {
+    const ai = await S.sample.json(prompt, { modelTier: "default" });
+    if (!ai || typeof ai !== "object") throw { code: "invalid_json" };
+    g.ai = Object.assign({ at: Date.now() }, ai); touch(g);
+  } catch (e) {
+    if (e && (e.code === "not_granted" || e.code === "sampling_disabled")) { S.sample = null; }
+    else toast(e && e.code === "rate_limited" ? "Demasiadas consultas, probá en un rato" : "No se pudo generar el informe", "err");
+  }
+  GV.aiBusy = false; drawAI();
+}
+function drawCoach() {
+  const g = cur(), el = $("#coachCard"); if (!el) return;
+  if (S.viewer && !S.sample) { el.classList.add("hidden"); return; }
+  if (!S.sample) { el.innerHTML = `<div class="sec-title"><h2>Preguntale al asistente</h2></div><p class="muted small">El asistente responde preguntas sobre el partido con las jugadas como evidencia. Está disponible cuando abrís esta página dentro de Claude.</p>`; return; }
+  const sugg = ["¿Quién fue el mejor jugador y por qué?", "¿De dónde vinieron nuestras pérdidas?", "Mostrame todos los triples convertidos", "¿En qué cuarto se definió el partido?"];
+  el.innerHTML = `<div class="sec-title"><h2>Preguntale al asistente</h2>${GV.chat.length ? `<button class="btn sm ghost" id="cClear">Limpiar</button>` : ""}</div>
+    <div class="chat" id="cLog">${GV.chat.map(m => `<div class="msg ${m.role === "user" ? "u" : "a"}">${m.role === "user" ? esc(m.content) : coachHTML(m.content)}</div>`).join("") || `<div class="small muted">Responde con los datos etiquetados y te deja los clips para mostrarle al plantel.</div>`}</div>
+    <div class="chips" style="margin:10px 0">${GV.chat.length ? "" : sugg.map(s => `<button class="chip" data-sug="${esc(s)}">${esc(s)}</button>`).join("")}</div>
+    <form class="row" id="cForm" style="flex-wrap:nowrap"><input class="inp" id="cIn" style="flex:1" placeholder="Escribí tu pregunta…" ${GV.coachBusy ? "disabled" : ""}><button class="btn pri" ${GV.coachBusy ? "disabled" : ""}>${GV.coachBusy ? "…" : "Preguntar"}</button>${GV.coachBusy ? `<button class="btn" type="button" id="cStop">Parar</button>` : ""}</form>`;
+  $("#cForm").onsubmit = ev => { ev.preventDefault(); const q = $("#cIn").value.trim(); if (q) askCoach(q); };
+  $$("[data-sug]", el).forEach(b => b.onclick = () => askCoach(b.dataset.sug));
+  const c = $("#cClear"); if (c) c.onclick = () => { GV.chat = []; drawCoach(); };
+  const s = $("#cStop"); if (s) s.onclick = () => GV.ctl && GV.ctl.abort();
+  bindClipLinks(el); const log = $("#cLog"); log.scrollTop = log.scrollHeight;
+}
+function coachHTML(txt) {
+  return esc(txt).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\[\[([a-z0-9]+)\]\]/gi, (m, id) => cur().events.some(e => e.id === id) ? `<button class="cl" data-cl="${id}">▶ clip</button>` : "");
+}
+function bindClipLinks(root) { $$("[data-cl]", root).forEach(b => b.onclick = () => { const g = cur(); playClip(g, g.events.find(e => e.id === b.dataset.cl)); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); }); }
+async function askCoach(q) {
+  const g = cur(); if (!S.sample || GV.coachBusy) return;
+  GV.chat.push({ role: "user", content: q }); GV.coachBusy = true; drawCoach();
+  const log = $("#cLog"); const bubble = document.createElement("div"); bubble.className = "msg a"; bubble.textContent = "Pensando…"; log.appendChild(bubble); log.scrollTop = log.scrollHeight;
+  const rules = `Sos el asistente de análisis de básquet del cuerpo técnico de ${g.us.name}. Respondé en español rioplatense, corto y concreto, con números. Usá solo estos datos y la herramienta buscar_jugadas; si algo no está etiquetado, decilo. Del rival solo hay puntos. Cuando menciones jugadas concretas, citá sus clips escribiendo [[id]] con el id de la jugada (máximo 8 clips por respuesta). No uses tablas.
+
+Resumen del partido:
+${JSON.stringify(gameDigest(g))}`;
+  const tools = [{
+    name: "buscar_jugadas",
+    description: "Busca jugadas etiquetadas del partido. Devuelve una lista (máx. 60) con id, tiempo, período, jugador y descripción. Tipos: fg (tiro de campo), ft (libre), reb, to (pérdida), stl (robo), blk (tapa), foul, pass, opp (punto rival), ast (tiros asistidos).",
+    inputSchema: { type: "object", properties: { tipo: { type: "string", enum: ["fg", "ft", "reb", "to", "stl", "blk", "foul", "pass", "opp", "ast", "todas"] }, jugador: { type: "string", description: "Número de camiseta, opcional" }, periodo: { type: "string", description: "Q1..Q4, TE1, 1T, 2T u omitido" }, resultado: { type: "string", enum: ["bien", "mal", "todos"] }, triples: { type: "boolean", description: "Solo triples (para fg)" } } },
+    execute: (inp) => {
+      let ev = g.events;
+      const tipo = String(inp.tipo || "todas");
+      if (tipo === "ast") ev = ev.filter(e => e.type === "fg" && e.d.made && e.d.ast);
+      else if (tipo !== "todas") ev = ev.filter(e => e.type === tipo);
+      if (inp.jugador) { const j = String(inp.jugador).replace(/\D/g, ""); ev = ev.filter(e => tipo === "ast" ? String(e.d.ast) === j : e.j === j); }
+      if (inp.triples) ev = ev.filter(e => e.type === "fg" && e.d.pts === 3);
+      if (inp.periodo) { const p = String(inp.periodo).toUpperCase(); ev = ev.filter(e => p === "1T" ? periodIdx(g, e.t) < 2 : p === "2T" ? periodIdx(g, e.t) >= 2 : periodLabel(periodIdx(g, e.t)) === p); }
+      if (inp.resultado === "bien") ev = ev.filter(success); else if (inp.resultado === "mal") ev = ev.filter(e => !success(e));
+      return { total: ev.length, jugadas: ev.slice(0, 60).map(e => ({ id: e.id, tiempo: fmtT(e.t), periodo: periodLabel(periodIdx(g, e.t)), jugador: e.team === "opp" ? g.opp.name : playerName(g, e.j), descripcion: describe(g, e), zona: e.type === "fg" && e.x != null ? ZONES[zoneOf(e.x, e.y)] : undefined })) };
+    }
+  }];
+  GV.ctl = new AbortController();
+  const turns = [{ role: "user", content: rules }, { role: "assistant", content: "Entendido. ¿Qué querés saber del partido?" }, ...GV.chat.slice(-10)];
+  let final = "";
+  try {
+    const opts = { signal: GV.ctl.signal, cache: false, onText: ({ text }) => { bubble.innerHTML = coachHTML(text); log.scrollTop = log.scrollHeight; } };
+    const lim = await S.sample.limits().catch(() => null);
+    if (lim && lim.tools) { delete opts.cache; opts.tools = tools; }
+    const r = await S.sample(turns, opts);
+    final = r.text;
+  } catch (e) {
+    final = e && e.text ? e.text : "";
+    if (e && (e.code === "not_granted" || e.code === "sampling_disabled")) { S.sample = null; }
+    else if (e && e.code !== "cancelled") final += (final ? "\n\n" : "") + (e.code === "rate_limited" ? "(Demasiadas consultas, probá en un rato.)" : "(No pude responder, probá de nuevo.)");
+  }
+  GV.chat.push({ role: "assistant", content: final || "(Sin respuesta)" });
+  GV.coachBusy = false; GV.ctl = null; drawCoach();
+}
+
+/* ---------- Compartir ---------- */
+function shareDialog(g) {
+  if (!(SB.c && SB.user)) {
+    modal(`<h3>Compartir el partido</h3><p>${SB.c ? "Ingresá con tu mail (arriba a la derecha) para poder compartir partidos." : "El link para compartir funciona en la versión de Aro en tu propio sitio, que ya está preparada: falta conectar la nube (Supabase) y publicarla."}</p>
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-x>Cerrar</button></div>`, (m, close) => m.querySelector("[data-x]").onclick = close);
+    return;
+  }
+  const link = location.origin + location.pathname + "?partido=" + encodeURIComponent(g.id);
+  modal(`<h3>Compartir el partido</h3>
+    <p class="small muted" style="margin-top:0">Cualquiera con el link ve el análisis y las jugadas en video (solo lectura, sin crear cuenta). Para que el video se vea, el link de YouTube tiene que ser público o no listado.</p>
+    <label class="row" style="gap:8px;margin:10px 0"><input type="checkbox" id="shOn" ${g.public ? "checked" : ""}> <b>Link público activado</b></label>
+    <div class="row" style="flex-wrap:nowrap"><input class="inp" id="shLink" readonly value="${esc(link)}" style="flex:1" ${g.public ? "" : "disabled"}><button class="btn pri" id="shCopy" ${g.public ? "" : "disabled"}>Copiar</button></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" data-x>Listo</button></div>`, (m, close) => {
+    m.querySelector("[data-x]").onclick = () => { close(); renderGame(); };
+    m.querySelector("#shOn").onchange = e => { g.public = e.target.checked; touch(g); flush(); m.querySelector("#shLink").disabled = m.querySelector("#shCopy").disabled = !g.public; toast(g.public ? "Link activado" : "Link desactivado"); };
+    m.querySelector("#shCopy").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copiado"); } catch { m.querySelector("#shLink").select(); toast("Seleccionado: usá Ctrl+C", "warn"); } };
+  });
+}
+
+/* ---------- Exportar ---------- */
+const slug = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+async function saveFile(filename, data) {
+  if (S.downloads) {
+    try { await S.downloads.save({ filename, data }); toast("Archivo listo"); return; }
+    catch (e) { if (e && e.code === "declined") return; if (e && e.code === "rate_limited") { toast("Esperá un momento y probá de nuevo", "warn"); return; } }
+  }
+  modal(`<h3>${esc(filename)}</h3><p class="small muted">No se puede descargar desde esta vista. Copiá el contenido y guardalo en un archivo con ese nombre.</p>
+    <textarea class="inp" style="width:100%;height:240px;font:12px ui-monospace,monospace" readonly>${esc(data)}</textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-x>Cerrar</button><button class="btn pri" data-c>Copiar</button></div>`, (m, close) => {
+    m.querySelector("[data-x]").onclick = close;
+    m.querySelector("[data-c]").onclick = async () => { try { await navigator.clipboard.writeText(data); toast("Copiado"); } catch { m.querySelector("textarea").select(); toast("Seleccionado: usá Ctrl+C", "warn"); } };
+  });
+}
+const base = g => `${g.date}-${slug(g.us.name)}-vs-${slug(g.opp.name)}`;
+function exportJSON(g) { saveFile(base(g) + ".json", JSON.stringify(g, null, 1)); }
+const csvCell = v => { const s = String(v ?? ""); return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+function exportEventsCSV(g) {
+  const head = ["id", "segundo_video", "periodo", "equipo", "camiseta", "jugador", "tipo", "descripcion", "exito", "x", "y", "zona", "puntos", "asistencia", "destacada"];
+  const rows = g.events.map(e => [e.id, e.t, periodLabel(periodIdx(g, e.t)), e.team === "opp" ? g.opp.name : g.us.name, e.j || "", e.team === "opp" ? "" : playerName(g, e.j), TYPE_LABEL[e.type], describe(g, e), success(e) ? 1 : 0, e.x ?? "", e.y ?? "", e.type === "fg" && e.x != null ? ZONES[zoneOf(e.x, e.y)] : "", e.type === "fg" ? (e.d.made ? e.d.pts : 0) : e.type === "ft" ? (e.d.made ? 1 : 0) : e.type === "opp" ? e.d.pts : "", e.d.ast || "", e.hl ? 1 : 0]);
+  saveFile(base(g) + "-jugadas.csv", [head, ...rows].map(r => r.map(csvCell).join(",")).join("\n"));
+}
+function exportBoxCSV(g) {
+  const st = computeStats(g);
+  const head = ["jugador", "pts", "tcc", "tci", "dobles_c", "dobles_i", "triples_c", "triples_i", "tl_c", "tl_i", "reb_of", "reb_def", "reb", "ast", "perdidas", "robos", "tapas", "faltas", "pases_ok", "pases", "valoracion"];
+  const r = (n, s) => [n, s.pts, s.fgm, s.fga, s.p2m, s.p2a, s.p3m, s.p3a, s.ftm, s.fta, s.oreb, s.dreb, s.reb, s.ast, s.to, s.stl, s.blk, s.pf, s.passOk, s.pass, s.val];
+  const rows = sortedRosterJs(g, st).map(j => r(playerName(g, j), st.pl[j] || line()));
+  rows.push(r("Total equipo", st.team));
+  saveFile(base(g) + "-box-score.csv", [head, ...rows].map(x => x.map(csvCell).join(",")).join("\n"));
+}
+
+/* ============================================================
+   Partido de ejemplo (datos generados, sin video)
+   ============================================================ */
+function makeDemo(seed = 14) { const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const roster = [["4", "Benítez"], ["5", "Ojeda"], ["7", "Ramírez"], ["8", "Duarte"], ["10", "Sosa"], ["11", "Acuña"], ["14", "Gauna"], ["21", "Villalba"], ["32", "Ayala"], ["35", "Cabrera"]].map(([j, n]) => ({ j, n }));
+  const g = newGame({ demo: true, date: new Date().toISOString().slice(0, 10), comp: "Ejemplo", us: { name: "Club Ejemplo", color: "#e8641b" }, opp: { name: "Rival Ejemplo", color: "#2b3a55" }, roster, start: 30, qEnd: [1650, 3300, 5100, 6800], dir: "R" });
+  const weight = { "4": 9, "5": 6, "7": 3, "8": 4, "10": 10, "11": 3, "14": 5, "21": 2, "32": 8, "35": 7 };
+  const wp = () => { const tot = Object.values(weight).reduce((a, b) => a + b, 0); let r = rnd() * tot; for (const [j, w] of Object.entries(weight)) { r -= w; if (r <= 0) return j; } return "10"; };
+  const other = j => { let k; do k = wp(); while (k === j); return k; };
+  const loc = (three, close) => {
+    let mx, my;
+    if (three) { if (rnd() < .25) { mx = CW - 1 - rnd() * 1.6; my = rnd() < .5 ? 0.45 : CH - 0.45; } else { const a = (rnd() - .5) * Math.PI * .8, r = 7 + rnd() * .8; mx = RIM_X - Math.cos(a) * r; my = RIM_Y + Math.sin(a) * r; } }
+    else { const a = (rnd() - .5) * Math.PI * .95, r = close ? .4 + rnd() * 1.2 : 2 + rnd() * 4.2; mx = RIM_X - Math.cos(a) * r; my = RIM_Y + Math.sin(a) * r; }
+    const [x, y] = toP(clamp(mx, 14.5, CW - .3), clamp(my, .3, CH - .3)); return [r2(x), r2(y)];
+  };
+  const defLoc = () => { const [x, y] = toP(1.5 + rnd() * 6, 2 + rnd() * 11); return [r2(x), r2(y)]; };
+  const ev = []; const add = (t, type, j, d, xy, extra = {}) => ev.push(Object.assign({ id: uid() + ev.length, t: r2(t), type, team: type === "opp" ? "opp" : "us", j: j || null, d, x: xy ? xy[0] : null, y: xy ? xy[1] : null }, extra));
+  const segs = [[40, 1640], [1700, 3290], [3360, 5090], [5150, 6790]];
+  for (const [a, b] of segs) {
+    let t = a + 5, ours = rnd() < .5;
+    while (t < b - 25) {
+      if (ours) {
+        t += 8 + rnd() * 8;
+        let j = wp(); const np = Math.floor(rnd() * 4);
+        for (let i = 0; i < np; i++) { const k = other(j); add(t, "pass", j, { ok: rnd() > .06 }, null); t += 4 + rnd() * 4; j = k; }
+        const r = rnd();
+        if (r < .12) { add(t, "to", j, { kind: pick(TO_KINDS.slice(0, 5)) }, loc(false, false)); t += 8; ours = false; continue; }
+        if (r < .2) { const m1 = rnd() < .74, m2 = rnd() < .74; add(t + 25, "ft", j, { made: m1 }, toP(CW - 5.8, RIM_Y)); add(t + 45, "ft", j, { made: m2 }, toP(CW - 5.8, RIM_Y)); t += 60; ours = false; continue; }
+        const three = rnd() < .33, close = !three && rnd() < .45, made = rnd() < (three ? .34 : close ? .58 : .40);
+        const xy = loc(three, close);
+        const d = { pts: three ? 3 : 2, made, kind: close ? (rnd() < .08 ? "volcada" : "bandeja") : "tiro" };
+        if (made && rnd() < .6) d.ast = other(j);
+        if (made && rnd() < .05) d.and1 = true;
+        add(t, "fg", j, d, xy, { hl: made && three && rnd() < .3 });
+        if (d.and1) add(t + 30, "ft", j, { made: rnd() < .7 }, toP(CW - 5.8, RIM_Y));
+        t += 6 + rnd() * 4;
+        if (!made) { if (rnd() < .28) { add(t, "reb", wp(), { off: true }, loc(false, true)); t += 2; continue; } }
+        ours = false;
+      } else {
+        t += 26 + rnd() * 18; const r = rnd();
+        if (r < .37) add(t, "opp", null, { pts: rnd() < .3 ? 3 : 2 });
+        else if (r < .5) { add(t, "opp", null, { pts: 1 }); add(t + 20, "opp", null, { pts: rnd() < .7 ? 1 : 0 }); t += 20; }
+        else if (r < .6) { add(t, "stl", wp(), {}, defLoc()); t += 3; ours = true; continue; }
+        else if (r < .65) { add(t, "blk", wp(), {}, (() => { const [x, y] = toP(1.2 + rnd() * 2.5, 5.5 + rnd() * 4); return [r2(x), r2(y)]; })()); add(t + 2, "reb", wp(), { off: false }, defLoc()); t += 4; ours = true; continue; }
+        else if (r < .72) { add(t, "foul", wp(), { kind: pick(["personal", "en tiro"]) }, defLoc()); }
+        else add(t + 2, "reb", wp(), { off: false }, (() => { const [x, y] = toP(.8 + rnd() * 3.5, 4 + rnd() * 7); return [r2(x), r2(y)]; })());
+        t += 6; ours = true;
+      }
+    }
+  }
+  g.events = ev.filter(e => !(e.type === "opp" && !e.d.pts)).sort((a, b) => a.t - b.t);
+  return g;
+}
+
+/* ============================================================
+   Inicio
+   ============================================================ */
+async function loadSeeds() {
+  if (S.viewer || (CONFIG.supabaseUrl && SHARED_ID)) return;
+  // Partidos que vienen incluidos con la página (partidos/index.json): se agregan una sola vez
+  try {
+    const r = await fetch("partidos/index.json", { cache: "no-store" }); if (!r.ok) return;
+    const list = await r.json(); const seen = lsGet("aro.seeded", []); let added = null;
+    for (const f of list) {
+      if (seen.includes(f.id) || S.games[f.id]) { if (!seen.includes(f.id)) seen.push(f.id); continue; }
+      const gr = await fetch("partidos/" + f.file, { cache: "no-store" }); if (!gr.ok) continue;
+      const g = Object.assign(newGame(), await gr.json(), { updatedAt: Date.now() });
+      S.games[g.id] = g; seen.push(g.id); added = g; touch(g);
+    }
+    lsSet("aro.seeded", seen);
+    if (added) { setCur(added.id); toast(`Nuevo partido: ${added.us.name} vs ${added.opp.name}`); render(); }
+  } catch (e) { }
+}
+render();
+initStore().then(loadSeeds).then(() => { if (route === "inicio") renderHome(); });
+</script>
+</body>
+</html>
