@@ -1886,8 +1886,9 @@ async function loadSeeds() {
     if (added) { setCur(added.id); toast(`Nuevo partido: ${added.us.name} vs ${added.opp.name}`); render(); }
   } catch (e) { }
 }
+if (!(CONFIG.supabaseUrl && SHARED_ID)) { S.games = lsGet(LS_KEY, {}) || {}; S.cur = lsGet(LS_CUR, null); }
 render();
-initStore().then(loadSeeds).then(() => { if (route === "inicio") renderHome(); });
+initStore().then(loadSeeds).then(() => render());
 </script>
 </body>
 </html>
