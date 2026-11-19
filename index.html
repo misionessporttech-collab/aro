@@ -1723,11 +1723,13 @@ async function loadSeeds() {
         if (!seen.includes(f.id)) seen.push(f.id);
         const ex = S.games[f.id];
         if (ex && f.yt && !ex.yt) { ex.yt = f.yt; ex.ytUrl = "https://youtu.be/" + f.yt; touch(ex); toast("Video de YouTube vinculado a " + ex.us.name + " vs " + ex.opp.name); }
+        const rk = f.id + "@" + (f.rev || 1);
+        if (ex && f.patch && f.rev && !seen.includes(rk)) { Object.assign(ex, f.patch); seen.push(rk); touch(ex); toast("Partido actualizado: " + ex.us.name + " vs " + ex.opp.name); if (route !== "inicio") render(); }
         continue;
       }
       const gr = await fetch("partidos/" + f.file, { cache: "no-store" }); if (!gr.ok) continue;
       const g = Object.assign(newGame(), await gr.json(), { updatedAt: Date.now() });
-      S.games[g.id] = g; seen.push(g.id); added = g; touch(g);
+      S.games[g.id] = g; seen.push(g.id); if (f.rev) seen.push(f.id + "@" + f.rev); added = g; touch(g);
     }
     lsSet("aro.seeded", seen);
     if (added) { setCur(added.id); toast(`Nuevo partido: ${added.us.name} vs ${added.opp.name}`); render(); }
