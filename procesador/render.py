@@ -1,73 +1,76 @@
-"""Video de muestra: panorámica con recuadro + nombre de cada jugador y minimapa de la cancha."""
-import json, subprocess, numpy as np, cv2, sys
+"""Video panorámico con el nombre sobre cada jugador y minimapa de la cancha.
 
-SRC = "/mnt/user-data/uploads/Downloads/Clip 2.mp4"
-X0, W, H = 355, 3332, 2160
-VY = 0.55
-OW = 1600
-sx = OW / W; sy = sx * VY / 1.0
-OH = int(H * VY * sx) // 2 * 2
-data = json.load(open("tracks.json"))
-R = np.load("R.npy")
-names = {"1": "Amprino R", "2": "Clara V", "3": "Montes", "4": "Tantos L", "5": "Perez D", "7": "Corsi B", "10": "Lopez M",
-         "14": "Nuñez L", "31": "Tonarelli", "32": "Dade M", "35": "Barber R"}
-COL = {"mitre": (40, 200, 255), "suardi": (60, 60, 230), "ref": (160, 160, 160)}
+Uso:
+  python render.py --video panoramica.mp4 --salida carpeta/ [--desde 0 --hasta 0 --ancho 1920]
+Usa carpeta/crop.json y carpeta/etiquetas.json (generados por pipeline.py y procesar.py).
+"""
+import argparse, json, os, subprocess, numpy as np, cv2
 
-# cajas por cuadro de detección (10 fps)
-boxes = {}
-for t in data["tracks"]:
-    lbl = (f"#{t['j']} {names.get(t['j'], '')}".strip() if t["j"] else ("Mitre" if t["team"] == "mitre" else "Suardi" if t["team"] == "suardi" else "Árbitro"))
-    for f, di in t["det"].items():
-        x1, y1, x2, y2 = R[di, 4:8]
-        boxes.setdefault(int(f), []).append((t["id"], t["team"], lbl, np.array([x1, y1, x2, y2]), t["pts"].get(f)))
+def hex2bgr(h):
+    h = h.lstrip("#"); r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return (b, g, r)
 
-def draw_minimap(img, items):
-    mw, mh = 300, 161; ox, oy = 14, OH - mh - 14
-    s = mw / 28.0
-    cv2.rectangle(img, (ox - 6, oy - 6), (ox + mw + 6, oy + mh + 6), (25, 25, 25), -1)
-    cv2.rectangle(img, (ox, oy), (ox + mw, oy + int(15 * s)), (70, 130, 190), -1)
-    L = lambda x, y: (int(ox + x * s), int(oy + y * s))
-    c = (235, 235, 235)
-    cv2.rectangle(img, L(0, 0), L(28, 15), c, 1); cv2.line(img, L(14, 0), L(14, 15), c, 1)
-    cv2.circle(img, L(14, 7.5), int(1.8 * s), c, 1)
-    for side in (0, 1):
-        x0 = 0 if side == 0 else 28 - 5.8
-        cv2.rectangle(img, L(x0, 5.05), L(x0 + 5.8, 9.95), c, 1)
-    for tid, tm, lbl, b, p in items:
-        if p is None: continue
-        cv2.circle(img, L(*p), 6, COL[tm], -1); cv2.circle(img, L(*p), 6, (20, 20, 20), 1)
-        if lbl.startswith("#"):
-            cv2.putText(img, lbl.split()[0][1:], (L(*p)[0] + 7, L(*p)[1] + 4), 0, 0.38, (255, 255, 255), 1, cv2.LINE_AA)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--video", required=True); ap.add_argument("--salida", required=True)
+    ap.add_argument("--desde", type=float, default=0); ap.add_argument("--hasta", type=float, default=0)
+    ap.add_argument("--ancho", type=int, default=1920); ap.add_argument("--vy", type=float, default=0.55)
+    a = ap.parse_args()
+    crop = json.load(open(os.path.join(a.salida, "crop.json")))
+    E = json.load(open(os.path.join(a.salida, "etiquetas.json")))
+    fps_det = E["fps"]; frames = E["frames"]
+    cols = [hex2bgr(c) for c in E["colores"]]
+    cols = [c if sum(c) < 700 else (27, 100, 232) for c in cols] + [(160, 160, 160)]
+    cw, ch = crop[2] - crop[0], crop[3] - crop[1]
+    OW = a.ancho // 2 * 2; s = OW / cw; OH = int(ch * a.vy * s) // 2 * 2
+    out_fps = 30
+    dur = (a.hasta or len(frames) / fps_det) - a.desde
+    cmd = ["ffmpeg", "-loglevel", "error", "-ss", str(a.desde), "-i", a.video, "-t", str(dur),
+           "-vf", f"fps={out_fps},crop={cw}:{ch}:{crop[0]}:{crop[1]},scale={OW}:{OH}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+    outp = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OW}x{OH}", "-r", str(out_fps), "-i", "-",
+                             "-i", a.video, "-ss", str(a.desde), "-map", "0:v", "-map", "1:a?", "-shortest",
+                             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                             os.path.join(a.salida, "panoramica_con_etiquetas.mp4")], stdin=subprocess.PIPE)
+    mw = int(OW * 0.19); ms = mw / 28.0; mh = int(15 * ms)
+    n = 0
+    while True:
+        b = p.stdout.read(OW * OH * 3)
+        if len(b) < OW * OH * 3: break
+        img = np.frombuffer(b, np.uint8).reshape(OH, OW, 3).copy()
+        fi = (a.desde + n / out_fps) * fps_det
+        k = int(np.floor(fi)); w = fi - k
+        A = frames[k] if 0 <= k < len(frames) else []
+        B = frames[k + 1] if 0 <= k + 1 < len(frames) else []
+        Bd = {(r[4], r[5]): r for r in B if r[5] and r[5] != "?"}
+        ox, oy = 14, OH - mh - 14
+        cv2.rectangle(img, (ox - 5, oy - 5), (ox + mw + 5, oy + mh + 5), (25, 25, 25), -1)
+        cv2.rectangle(img, (ox, oy), (ox + mw, oy + mh), (70, 130, 190), -1)
+        L = lambda x, y: (int(ox + x * ms), int(oy + y * ms))
+        cv2.rectangle(img, L(0, 0), L(28, 15), (235, 235, 235), 1); cv2.line(img, L(14, 0), L(14, 15), (235, 235, 235), 1)
+        cv2.circle(img, L(14, 7.5), int(1.8 * ms), (235, 235, 235), 1)
+        for x0 in (0, 22.2): cv2.rectangle(img, L(x0, 5.05), L(x0 + 5.8, 9.95), (235, 235, 235), 1)
+        for r in A:
+            x1, y1, x2, y2, tc, lbl, X, Y = r
+            if (tc, lbl) in Bd and w > 0:
+                r2 = Bd[(tc, lbl)]
+                x1, y1, x2, y2 = [v * (1 - w) + v2 * w for v, v2 in zip((x1, y1, x2, y2), r2[:4])]
+                X, Y = X * (1 - w) + r2[6] * w, Y * (1 - w) + r2[7] * w
+            col = cols[tc]
+            X1, Y1, X2, Y2 = int(x1 * s), int(y1 * s * a.vy), int(x2 * s), int(y2 * s * a.vy)
+            cv2.rectangle(img, (X1, Y1), (X2, Y2), col, 2)
+            if tc == 0 and lbl:
+                fs = 0.42 * OW / 1600
+                (tw, th), _ = cv2.getTextSize(lbl, 0, fs, 1)
+                cv2.rectangle(img, (X1, Y1 - th - 6), (X1 + tw + 6, Y1), col, -1)
+                ink = (20, 20, 20) if sum(col) > 380 else (255, 255, 255)
+                cv2.putText(img, lbl, (X1 + 3, Y1 - 4), 0, fs, ink, 1, cv2.LINE_AA)
+            cv2.circle(img, L(X, Y), 5, col, -1); cv2.circle(img, L(X, Y), 5, (20, 20, 20), 1)
+            if tc == 0 and lbl.startswith("#"):
+                cv2.putText(img, lbl.split()[0][1:], (L(X, Y)[0] + 6, L(X, Y)[1] + 4), 0, 0.36, (255, 255, 255), 1, cv2.LINE_AA)
+        outp.stdin.write(img.tobytes()); n += 1
+    outp.stdin.close(); outp.wait()
+    print("video listo:", os.path.join(a.salida, "panoramica_con_etiquetas.mp4"), n, "cuadros")
 
-cmd = ["ffmpeg", "-loglevel", "error", "-i", SRC, "-vf", f"crop={W}:{H}:{X0}:0,scale={OW}:{OH}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
-outp = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OW}x{OH}", "-r", "30", "-i", "-",
-                         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "muestra_seguimiento.mp4"], stdin=subprocess.PIPE)
-n = 0
-limit = int(sys.argv[1]) if len(sys.argv) > 1 else 10**9
-while n < limit:
-    buf = p.stdout.read(OW * OH * 3)
-    if len(buf) < OW * OH * 3: break
-    img = np.frombuffer(buf, np.uint8).reshape(OH, OW, 3).copy()
-    fi = n / 3.0; a = int(np.floor(fi)); w = fi - a
-    A = {b[0]: b for b in boxes.get(a, [])}; B = {b[0]: b for b in boxes.get(a + 1, [])}
-    items = []
-    for tid, it in A.items():
-        bb = it[3]; pp = it[4]
-        if tid in B and w > 0:
-            bb = bb * (1 - w) + B[tid][3] * w
-            if pp is not None and B[tid][4] is not None: pp = list(np.array(pp) * (1 - w) + np.array(B[tid][4]) * w)
-        items.append((tid, it[1], it[2], bb, pp))
-    for tid, tm, lbl, bb, pp in items:
-        x1, y1, x2, y2 = bb
-        X1, Y1, X2, Y2 = int(x1 * sx), int(y1 * sx * VY), int(x2 * sx), int(y2 * sx * VY)
-        col = COL[tm]
-        cv2.rectangle(img, (X1, Y1), (X2, Y2), col, 2)
-        if tm != "ref":
-            (tw, th), _ = cv2.getTextSize(lbl, 0, 0.42, 1)
-            cv2.rectangle(img, (X1, Y1 - th - 6), (X1 + tw + 6, Y1), col, -1)
-            cv2.putText(img, lbl, (X1 + 3, Y1 - 4), 0, 0.42, (20, 20, 20), 1, cv2.LINE_AA)
-    draw_minimap(img, items)
-    outp.stdin.write(img.tobytes()); n += 1
-outp.stdin.close(); outp.wait()
-print("cuadros", n)
+if __name__ == "__main__":
+    main()

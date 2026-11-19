@@ -1,17 +1,14 @@
-"""Calibración de la cámara panorámica: cancha (metros) <-> imagen (píxeles).
-Modelo: homografía + distorsión radial (k1, k2) con centro libre.
-Se ajusta con: esquinas y puntas de la línea central (marcadas a mano) +
-el borde completo del piso (máscara), con pérdida robusta.
+"""Calibración de la cámara panorámica de Veo: cancha (metros) <-> imagen (píxeles).
+
+Modelo de cámara cilíndrica (como la unión panorámica de Veo):
+params = [Cx, Cy, Cz, yaw, pitch, roll, f, f2, u0, v0]
+Se ajusta al borde del piso de madera (máscara de color) y, si se dan, a puntos marcados a mano.
 """
-import cv2, numpy as np, json
+import json, numpy as np, cv2
 from scipy.optimize import least_squares
+from scipy.spatial import cKDTree
 
 CW, CH = 28.0, 15.0
-PTS = {  # (X, Y) en metros -> (u, v) en píxeles de la imagen recortada
-    (0, 0): (837, 527), (28, 0): (2478, 483), (0, 15): (100, 1519), (28, 15): (3200, 1184),
-    (14, 15): (2000, 2045),
-}
-S = 2000.0
 
 def rot(yaw, pitch, roll):
     cy_, sy = np.cos(yaw), np.sin(yaw); cp, sp = np.cos(pitch), np.sin(pitch); cr, sr = np.cos(roll), np.sin(roll)
@@ -21,59 +18,94 @@ def rot(yaw, pitch, roll):
     return Rr @ Rx @ Rz
 
 def forward(params, XY):
-    """Cámara cilíndrica: params = [Cx, Cy, Cz, yaw, pitch, roll, f, f2, u0, v0]"""
     Cx, Cy, Cz, yaw, pitch, roll, f, f2, u0, v0 = params[:10]
     XY = np.atleast_2d(XY)
     P = np.c_[XY, np.zeros(len(XY))] - [Cx, Cy, Cz]
-    # marco cámara: z adelante (hacia -Y del mundo), x a la derecha (+X), y abajo (-Z)
     base = np.c_[P[:, 0], -P[:, 2], -P[:, 1]]
     d = base @ rot(yaw, pitch, roll).T
     th = np.arctan2(d[:, 0], d[:, 2])
     rho = np.sqrt(d[:, 0] ** 2 + d[:, 2] ** 2)
     return np.c_[u0 + f * th, v0 + f2 * d[:, 1] / rho]
 
-def fit(mask_path='court_mask.png'):
-    mask = cv2.imread(mask_path, 0)
+def court_mask(img):
+    """Piso de madera + pintura amarilla, sin el azul de afuera."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    H, S, V = cv2.split(hsv)
+    wood = ((H >= 8) & (H <= 40) & (V > 110)).astype(np.uint8) * 255
+    k = max(5, int(img.shape[1] / 130))
+    wood = cv2.morphologyEx(wood, cv2.MORPH_CLOSE, np.ones((k, k), np.uint8))
+    wood = cv2.morphologyEx(wood, cv2.MORPH_OPEN, np.ones((k // 2 + 1, k // 2 + 1), np.uint8))
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(wood)
+    big = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+    mask = (lab == big).astype(np.uint8) * 255
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    fill = np.zeros_like(mask); cv2.drawContours(fill, cnts, -1, 255, -1)
+    return fill
+
+def _edges():
+    t = np.linspace(0, 1, 120)
+    return np.r_[np.c_[t * CW, 0 * t], np.c_[t * CW, 0 * t + CH], np.c_[0 * t, t * CH], np.c_[0 * t + CW, t * CH]]
+
+def fit(mask, p0, pts=None, w_pts=2.0):
     edge = cv2.Canny(mask, 50, 150)
     dist = cv2.distanceTransform(255 - edge, cv2.DIST_L2, 5)
     Hh, Ww = mask.shape
-    best = None
-    for Cy in (18, 21, 24):
-      for Cz in (4, 7, 10):
-        for pitch in (-0.3, -0.5, -0.7):
-          p0 = np.r_[14.5, Cy, Cz, 0.0, pitch, 0.0, 1350, 1350, Ww / 2, Hh / 2]
-          s0 = least_squares(lambda p: (forward(p, np.array(list(PTS.keys()), float)) - np.array(list(PTS.values()), float)).ravel(), p0, max_nfev=3000)
-          if best is None or s0.cost < best.cost: best = s0
-    p0 = best.x
-    print('init cost', round(best.cost, 1), np.round(p0, 2))
-    t = np.linspace(0, 1, 120)
-    edges = np.r_[np.c_[t * CW, 0 * t], np.c_[t * CW, 0 * t + CH], np.c_[0 * t, t * CH], np.c_[0 * t + CW, t * CH]]
-    kp = np.array(list(PTS.keys()), float); kv = np.array(list(PTS.values()), float)
-
+    E = _edges()
+    kp = np.array(list(pts.keys()), float) if pts else None
+    kv = np.array(list(pts.values()), float) if pts else None
     def res(p):
-        pr = forward(p, kp)
-        r1 = ((pr - kv) * 2.0).ravel()
-        pe = forward(p, edges)
-        x = np.clip(pe[:, 0], 0, Ww - 1); y = np.clip(pe[:, 1], 0, Hh - 1)
-        r2 = cv2.remap(dist, x.astype(np.float32).reshape(-1, 1), y.astype(np.float32).reshape(-1, 1), cv2.INTER_LINEAR).ravel()
+        r = []
+        if pts: r.append(((forward(p, kp) - kv) * w_pts).ravel())
+        pe = forward(p, E)
+        x = np.clip(pe[:, 0], 0, Ww - 1).astype(np.float32); y = np.clip(pe[:, 1], 0, Hh - 1).astype(np.float32)
+        d = cv2.remap(dist, x.reshape(-1, 1), y.reshape(-1, 1), cv2.INTER_LINEAR).ravel()
         out = ((pe[:, 0] < 0) | (pe[:, 0] >= Ww) | (pe[:, 1] < 0) | (pe[:, 1] >= Hh)) * 50.0
-        return np.r_[r1, r2 + out]
-
-    sol = least_squares(res, p0, loss='soft_l1', f_scale=8.0, x_scale='jac', max_nfev=4000)
+        r.append(d + out)
+        return np.concatenate(r)
+    sol = least_squares(res, p0, loss="soft_l1", f_scale=8.0, x_scale="jac", max_nfev=4000)
     r = res(sol.x)
-    print('error esquinas (px):', np.round(np.abs(r[:10]).reshape(-1, 2).sum(1) / 2, 1))
-    print('borde: mediana px', round(float(np.median(r[10:])), 1), 'p90', round(float(np.percentile(r[10:], 90)), 1))
-    json.dump({'params': sol.x.tolist()}, open('calib.json', 'w'))
-    return sol.x
+    rb = r[-len(E):]
+    return sol.x, float(np.median(rb)), float(np.percentile(rb, 90))
+
+def draw(img, p, path, scale=0.4):
+    vis = img.copy()
+    t = np.linspace(0, 1, 100)
+    th = max(2, int(img.shape[1] / 800))
+    def poly(pts, col):
+        pi = forward(p, np.array(pts, float)).astype(int)
+        cv2.polylines(vis, [pi.reshape(-1, 1, 2)], False, col, th)
+    for seg in [np.c_[t * 28, 0 * t], np.c_[t * 28, 0 * t + 15], np.c_[0 * t, t * 15], np.c_[0 * t + 28, t * 15], np.c_[0 * t + 14, t * 15]]:
+        poly(seg, (0, 0, 255))
+    a = np.linspace(0, 2 * np.pi, 120)
+    poly(np.c_[14 + 1.8 * np.cos(a), 7.5 + 1.8 * np.sin(a)], (0, 255, 0))
+    for X in (lambda v: v, lambda v: 28 - v):
+        poly([[X(0), 5.05], [X(5.8), 5.05], [X(5.8), 9.95], [X(0), 9.95]], (255, 0, 255))
+        th_ = np.linspace(-1.35, 1.35, 100)
+        poly(np.c_[[X(v) for v in 1.575 + 6.75 * np.cos(th_)], 7.5 + 6.75 * np.sin(th_)], (255, 255, 0))
+    cv2.imwrite(path, cv2.resize(vis, None, fx=scale, fy=scale))
+
+def refit_auto(frame, base, vis_path=None):
+    """Reajusta una calibración previa (por ejemplo la de Mitre) a una grabación nueva."""
+    p0 = np.array(base["params"], float)
+    bw, bh = base.get("size", [3332, 2160])
+    h, w = frame.shape[:2]
+    sx, sy = w / bw, h / bh
+    p0[6] *= sx; p0[8] *= sx; p0[7] *= sy; p0[9] *= sy
+    mask = court_mask(frame)
+    p, med, p90 = fit(mask, p0)
+    print(f"calibración automática: borde a {med:.1f} px (mediana), {p90:.1f} px (p90)")
+    if med > 6:
+        print("ATENCIÓN: la calibración no encaja bien; puede ser otra cancha u otro encuadre. Revisá calib_vis.jpg.")
+    if vis_path: draw(frame, p, vis_path)
+    return p
 
 class Mapper:
-    """Imagen -> cancha por inversión numérica, con tabla densa para inicializar."""
+    """Imagen -> cancha por inversión numérica."""
     def __init__(self, params):
         self.p = np.array(params)
         gx, gy = np.meshgrid(np.arange(-3, 31.01, 0.25), np.arange(-3, 18.01, 0.25))
         self.grid = np.c_[gx.ravel(), gy.ravel()]
         self.img = forward(self.p, self.grid)
-        from scipy.spatial import cKDTree
         self.tree = cKDTree(self.img)
 
     def to_court(self, uv):
@@ -81,32 +113,9 @@ class Mapper:
         _, idx = self.tree.query(uv)
         out = []
         for q, i in zip(uv, idx):
-            x0 = self.grid[i]
-            s = least_squares(lambda xy: forward(self.p, xy[None])[0] - q, x0, method='lm')
+            s = least_squares(lambda xy: forward(self.p, xy[None])[0] - q, self.grid[i], method="lm")
             out.append(s.x)
         return np.array(out)
 
     def to_image(self, XY):
         return forward(self.p, np.atleast_2d(np.asarray(XY, float)))
-
-if __name__ == '__main__':
-    p = fit()
-    img = cv2.imread('frames/pano_crop.png')
-    def poly(pts, col, th=4):
-        pi = forward(p, np.array(pts, float)).astype(int)
-        cv2.polylines(img, [pi.reshape(-1, 1, 2)], False, col, th)
-    t = np.linspace(0, 1, 100)
-    for seg in [np.c_[t * 28, 0 * t], np.c_[t * 28, 0 * t + 15], np.c_[0 * t, t * 15], np.c_[0 * t + 28, t * 15], np.c_[0 * t + 14, t * 15]]:
-        poly(seg, (0, 0, 255))
-    a = np.linspace(0, 2 * np.pi, 120)
-    poly(np.c_[14 + 1.8 * np.cos(a), 7.5 + 1.8 * np.sin(a)], (0, 255, 0))
-    for sx in (0, 1):
-        X = (lambda v: v) if sx == 0 else (lambda v: 28 - v)
-        poly([[X(0), 5.05], [X(5.8), 5.05], [X(5.8), 9.95], [X(0), 9.95]], (255, 0, 255))
-        poly(np.c_[[X(5.8 + 1.8 * np.cos(v)) for v in a], 7.5 + 1.8 * np.sin(a)], (255, 0, 255), 3)
-        aa = np.linspace(-np.arccos(6.6 / 6.75) - np.pi / 2 + np.pi, np.arccos(6.6 / 6.75) + np.pi / 2 - np.pi, 2)
-        th = np.linspace(-1.35, 1.35, 100)
-        arc = np.c_[1.575 + 6.75 * np.cos(th), 7.5 + 6.75 * np.sin(th)]
-        arc[:, 0] = [X(v) for v in arc[:, 0]]
-        poly(arc, (255, 255, 0), 3)
-    cv2.imwrite('frames/calib_vis.jpg', cv2.resize(img, None, fx=0.4, fy=0.4))

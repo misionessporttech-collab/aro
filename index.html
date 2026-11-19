@@ -779,6 +779,7 @@ function nextInList(step = 1) {
 }
 function onTick() {
   placeYT();
+  fisTick();
   if (!hasVideo()) return;
   if (route === "etiquetar") updateTagClock();
   if (V.clipEnd != null && P.time() >= V.clipEnd) {
@@ -1329,6 +1330,8 @@ function renderGame() {
       <p class="small muted" style="margin-bottom:0">Dónde estuvo activo ${GV.player ? esc(playerName(g, GV.player)) : "el equipo"}. Atacando siempre hacia la derecha.</p></div>
   </section>
 
+  <section class="card pad" style="margin-top:16px" id="fisCard"></section>
+
   <section class="card pad" style="margin-top:16px"><div class="sec-title"><h2>Mejores momentos</h2><button class="btn sm pri" id="hlAll">▶ Reproducir todos</button></div><div class="hl" id="gHl"></div></section>
 
   <section class="two-col" style="margin-top:16px">
@@ -1352,12 +1355,12 @@ function renderGame() {
   if ($("#shareBtn")) $("#shareBtn").onclick = () => shareDialog(g);
   $("#xEv").onclick = () => exportEventsCSV(g);
   $("#xBox").onclick = () => exportBoxCSV(g);
-  drawField(); drawBox(); drawRace(); drawImpact(); drawShots(); drawHeat(); drawHighlights(); drawAI(); drawCoach();
+  drawField(); drawBox(); drawRace(); drawImpact(); drawShots(); drawHeat(); drawHighlights(); drawAI(); drawCoach(); drawFisico();
 }
 function setPlayer(j) {
   GV.player = j || "";
   if ($("#fPl")) $("#fPl").value = GV.player;
-  drawField(); drawBox(); drawShots(); drawHeat(); drawImpact();
+  drawField(); drawBox(); drawShots(); drawHeat(); drawImpact(); drawFisico();
   const p = $("#gHeat")?.nextElementSibling; if (p) p.textContent = `Dónde estuvo activo ${GV.player ? playerName(cur(), GV.player) : "el equipo"}. Atacando siempre hacia la derecha.`;
 }
 function drawField() {
@@ -1489,6 +1492,143 @@ function drawHighlights() {
   el.innerHTML = list.length ? list.map(e => `<button data-h="${e.id}"><span class="small muted">${periodLabel(periodIdx(g, e.t))} · ${fmtT(e.t)}</span><b>${esc(playerName(g, e.j))}</b><span class="small">${esc(describe(g, e))}${e.hl ? " ★" : ""}</span></button>`).join("") : `<div class="empty small">Triples, and-ones, volcadas, tapas y jugadas marcadas con ★ aparecen acá.</div>`;
   $$("#gHl [data-h]").forEach(b => b.onclick = () => { playClip(g, g.events.find(x => x.id === b.dataset.h)); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); });
   $("#hlAll").onclick = () => { playList(g, list); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); };
+}
+
+
+/* ============================================================
+   RENDIMIENTO FÍSICO (seguimiento desde la panorámica)
+   g.fisico = { version, T0, cubre:[t0,t1], calidad, segs:[{id, team:'us'|'opp', j, conf, dist, dur, vmax, hi, spr, byP, t0, hz, x:[dm], y:[dm]}] }
+   ============================================================ */
+const FIS = { t: null, playing: false, last: 0, sel: "" };
+const kmh = v => (v * 3.6).toFixed(1);
+function fisAgg(g) {
+  const out = {}; const nP = byPeriod(g).n;
+  for (const s of g.fisico.segs) {
+    const k = s.team === "opp" ? "opp" : (s.j || "?");
+    const d = out[k] ??= { dist: 0, dur: 0, vmax: 0, hi: 0, spr: 0, byP: Array(nP).fill(0), n: 0 };
+    d.dist += s.dist; d.dur += s.dur; d.hi += s.hi; d.spr += s.spr; d.n++;
+    if (s.dur >= 4) d.vmax = Math.max(d.vmax, s.vmax);
+    (s.byP || []).forEach((v, i) => { if (i < nP) d.byP[i] += v; });
+  }
+  return out;
+}
+function fisPosAt(s, T) {
+  const i = (T - s.t0) * s.hz;
+  if (i < 0 || i > s.x.length - 1) return null;
+  const a = Math.floor(i), w = i - a, b = Math.min(a + 1, s.x.length - 1);
+  return [(s.x[a] * (1 - w) + s.x[b] * w) / 10, (s.y[a] * (1 - w) + s.y[b] * w) / 10];
+}
+function fisNow() { return hasVideo() ? vt() : (FIS.t ?? cur().fisico.cubre[0]); }
+function fisTick() {
+  const g = cur(); if (route !== "analisis" || !g || !g.fisico || !$("#fisMap")) return;
+  const now = performance.now();
+  if (!hasVideo() && FIS.playing) {
+    FIS.t = (FIS.t ?? g.fisico.cubre[0]) + (now - (FIS.last || now)) / 1000;
+    if (FIS.t > g.fisico.cubre[1]) { FIS.t = g.fisico.cubre[0]; }
+  }
+  FIS.last = now;
+  drawFisMap();
+}
+function drawFisMap() {
+  const g = cur(), el = $("#fisMap"); if (!el || !g.fisico) return;
+  const T = fisNow();
+  let dots = "";
+  for (const s of g.fisico.segs) {
+    const p = fisPosAt(s, T); if (!p) continue;
+    const us = s.team === "us", col = us ? (g.us.color.toLowerCase() === "#ffffff" ? "#e8641b" : g.us.color) : (g.opp.color.toLowerCase() === "#ffffff" ? "#4a5568" : g.opp.color);
+    const dim = FIS.sel && (!us || (s.j || "?") !== FIS.sel) ? 0.35 : 1;
+    dots += `<g opacity="${dim}"><circle cx="${p[0]}" cy="${p[1]}" r=".42" fill="${col}" stroke="#111" stroke-width=".07"/>${us ? `<text x="${p[0]}" y="${p[1] + 0.17}" font-size=".46" font-weight="700" text-anchor="middle" fill="${contrastInk(col)}" font-family="Barlow Condensed, sans-serif">${esc(s.j || "?")}</text>` : ""}</g>`;
+  }
+  el.innerHTML = courtSVG({ cls: "court", inner: dots }).replace('class="court"', 'class="court" style="cursor:default"');
+  const inRange = T >= g.fisico.cubre[0] && T <= g.fisico.cubre[1];
+  const lbl = $("#fisClock"); if (lbl) lbl.textContent = `${periodLabel(periodIdx(g, T))} · ${fmtT(T)}${inRange ? "" : " · fuera del tramo procesado"}`;
+}
+function drawFisico() {
+  const g = cur(), el = $("#fisCard"); if (!el) return;
+  if (!g.fisico) {
+    el.innerHTML = `<div class="sec-title"><h2>Rendimiento físico</h2></div>
+      <p class="muted small" style="margin-top:0">Distancia recorrida, velocidad media y máxima, alta intensidad y sprints de cada jugador, con un minimapa sincronizado con el video. Se calcula con el procesador de seguimiento sobre la grabación panorámica de Veo.</p>
+      ${S.viewer ? "" : `<button class="btn" id="fisImp">Importar análisis físico (.json)</button>`}`;
+    const b = $("#fisImp"); if (b) b.onclick = () => fisImport();
+    return;
+  }
+  const F = g.fisico, A = fisAgg(g), nP = byPeriod(g).n;
+  const ks = Object.keys(A).filter(k => k !== "opp" && k !== "?").sort((a, b) => A[b].dist - A[a].dist);
+  const tot = Object.entries(A).filter(([k]) => k !== "opp").reduce((t, [, d]) => (t.dist += d.dist, t.dur += d.dur, t.hi += d.hi, t.spr += d.spr, t.vmax = Math.max(t.vmax, d.vmax), d.byP.forEach((v, i) => t.byP[i] += v), t), { dist: 0, dur: 0, hi: 0, spr: 0, vmax: 0, byP: Array(nP).fill(0) });
+  const row = (name, d, cls = "", key = "") => `<tr class="${cls}" ${key ? `data-fj="${esc(key)}" style="cursor:pointer"` : ""}><td>${name}</td><td>${(d.dur / 60).toFixed(1)}</td><td><b>${Math.round(d.dist)}</b></td><td>${Math.round(d.dist / Math.max(d.dur / 60, 0.01))}</td><td>${kmh(d.vmax)}</td><td>${Math.round(d.hi)}</td><td>${d.spr}</td>${d.byP ? d.byP.map(v => `<td>${Math.round(v)}</td>`).join("") : Array(nP).fill("<td></td>").join("")}</tr>`;
+  const cover = F.cubre[1] - F.cubre[0];
+  const unk = g.fisico.segs.filter(s => s.team === "us" && !s.j);
+  const low = g.fisico.segs.filter(s => s.team === "us" && s.j && s.conf < 0.5 && !s.manual);
+  el.innerHTML = `<div class="sec-title"><h2>Rendimiento físico</h2><span class="small muted">Tramo procesado: ${fmtT(F.cubre[0])} a ${fmtT(F.cubre[1])} del video (${(cover / 60).toFixed(1)} min)</span></div>
+    <div class="scroll-x"><table class="box"><thead><tr><th>Jugador</th><th>Min</th><th>Dist. (m)</th><th>m/min</th><th>Vel. máx (km/h)</th><th>Alta int. (m)</th><th>Sprints</th>${Array.from({ length: nP }, (_, i) => `<th>${periodLabel(i)} (m)</th>`).join("")}</tr></thead><tbody>
+      ${ks.map(k => row(esc(playerName(g, k)), A[k], FIS.sel === k ? "on pl" : "pl", k)).join("")}
+      ${A["?"] ? row(`<span class="muted">Sin identificar</span>`, A["?"], FIS.sel === "?" ? "on pl" : "pl", "?") : ""}
+      ${row("Total " + esc(g.us.name), tot, "tot")}
+      ${A.opp ? row(`<span class="muted">${esc(g.opp.name)} (total)</span>`, { ...A.opp, byP: A.opp.byP }) : ""}
+    </tbody></table></div>
+    <p class="small muted">Alta intensidad: metros a más de ${kmh(F.umbral_alta || 5)} km/h. Sprint: más de ${kmh(F.umbral_sprint || 5.5)} km/h sostenido 1 s. Las métricas salen del video, con un margen aproximado de ±5-10 %. Clic en un jugador para resaltarlo.</p>
+    <div class="two-col" style="margin-top:12px">
+      <div><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Minimapa</b><span class="small muted" id="fisClock"></span></div>
+        <div id="fisMap"></div>
+        <div class="row" style="margin-top:8px">${hasVideo() ? `<span class="small muted">Sigue al video: dale play o elegí una jugada.</span>` : `<button class="btn sm" id="fisPlay">${FIS.playing ? "❚❚ Pausa" : "▶ Reproducir minimapa"}</button><input type="range" class="scrub" id="fisScrub" min="${F.cubre[0]}" max="${F.cubre[1]}" step="0.5" value="${fisNow()}">`}</div></div>
+      <div><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Mapa de calor del recorrido</b><span class="small muted">${FIS.sel ? esc(FIS.sel === "?" ? "Sin identificar" : playerName(g, FIS.sel)) : esc(g.us.name)} · atacando hacia la derecha</span></div><div id="fisHeat"></div></div>
+    </div>
+    ${S.viewer ? "" : `<details style="margin-top:12px" ${unk.length || low.length ? "open" : ""}><summary><b>Revisar identidades</b> <span class="small muted">(${unk.length} tramos sin identificar · ${low.length} dudosos)</span></summary>
+      <p class="small muted">El sistema identifica a cada jugador cruzando su recorrido con las jugadas etiquetadas. Cuando dos compañeros se cruzan de cerca, el recorrido se corta y cada tramo se identifica por separado. Elegí el número correcto y las métricas se recalculan.</p>
+      <div class="clips" style="max-height:300px">${[...unk, ...low].sort((a, b) => a.t0 - b.t0).map(s => `<div class="clip" style="grid-template-columns:110px 70px 1fr auto"><span class="num">${fmtT(s.t0)}–${fmtT(s.t0 + s.dur)}</span><span class="small muted">${Math.round(s.dist)} m</span>
+        <select class="inp" data-seg="${s.id}" style="padding:3px 6px"><option value="">Sin identificar</option>${sortedRosterJs(g, computeStats(g)).map(j => `<option value="${esc(j)}" ${s.j === j ? "selected" : ""}>${esc(playerName(g, j))}${s.j === j && s.conf < 0.5 ? " (probable)" : ""}</option>`).join("")}</select>
+        <button class="btn sm" data-segplay="${s.id}">▶ Ver</button></div>`).join("") || `<div class="empty small">No hay tramos para revisar.</div>`}</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" id="fisImp">Reemplazar análisis físico (.json)</button><button class="btn sm ghost danger" id="fisDel">Quitar análisis físico</button></div></details>`}`;
+  $$("#fisCard [data-fj]").forEach(r => r.onclick = () => { FIS.sel = FIS.sel === r.dataset.fj ? "" : r.dataset.fj; drawFisico(); });
+  $$("#fisCard [data-seg]").forEach(sel => sel.onchange = () => {
+    const s = g.fisico.segs.find(x => String(x.id) === sel.dataset.seg); s.j = sel.value || null; s.conf = sel.value ? 1 : 0; s.manual = true; touch(g); drawFisico(); toast("Identidad actualizada");
+  });
+  $$("#fisCard [data-segplay]").forEach(b => b.onclick = () => {
+    const s = g.fisico.segs.find(x => String(x.id) === b.dataset.segplay); FIS.sel = s.j || "?";
+    if (hasVideo()) { seek(s.t0); P.play(); $("#gVideo").scrollIntoView({ block: "center", behavior: "smooth" }); }
+    else { FIS.t = s.t0; FIS.playing = true; drawFisico(); }
+  });
+  const pb = $("#fisPlay"); if (pb) pb.onclick = () => { FIS.playing = !FIS.playing; FIS.last = performance.now(); pb.textContent = FIS.playing ? "❚❚ Pausa" : "▶ Reproducir minimapa"; };
+  const sc = $("#fisScrub"); if (sc) sc.oninput = () => { FIS.t = +sc.value; drawFisMap(); };
+  const imp = $("#fisImp"); if (imp) imp.onclick = () => fisImport();
+  const del = $("#fisDel"); if (del) del.onclick = async () => { if (await confirmBox("Se quita el análisis físico de este partido (las jugadas etiquetadas no se tocan).", "Quitar")) { delete g.fisico; touch(g); drawFisico(); } };
+  drawFisMap(); drawFisHeat();
+}
+function drawFisHeat() {
+  const g = cur(), el = $("#fisHeat"); if (!el) return;
+  const NX = 28, NY = 15, grid = new Float32Array(NX * NY);
+  for (const s of g.fisico.segs) {
+    if (s.team !== "us") continue;
+    if (FIS.sel && (s.j || "?") !== FIS.sel) continue;
+    for (let i = 0; i < s.x.length; i++) {
+      let x = s.x[i] / 10, y = s.y[i] / 10; const t = s.t0 + i / s.hz;
+      if (!attackRight(g, t)) { x = 28 - x; y = 15 - y; }
+      const gx = Math.floor(x), gy = Math.floor(y);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const X = gx + dx, Y = gy + dy; if (X < 0 || Y < 0 || X >= NX || Y >= NY) continue;
+        grid[Y * NX + X] += dx || dy ? 0.4 : 1;
+      }
+    }
+  }
+  const max = Math.max(1e-6, ...grid);
+  let inner = "";
+  grid.forEach((v, i) => { const a = v / max; if (a < 0.05) return; const x = i % NX, y = Math.floor(i / NX); inner += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="hsl(${50 - a * 50},95%,${52 - a * 10}%)" opacity="${(0.25 + a * 0.6).toFixed(2)}"/>`; });
+  el.innerHTML = courtSVG({ cls: "court", inner }).replace('class="court"', 'class="court" style="cursor:default"');
+}
+function fisImport() {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (!d || !Array.isArray(d.segs) || !d.cubre) throw 0;
+      const g = cur(); g.fisico = d; touch(g); FIS.sel = ""; drawFisico();
+      const kb = Math.round(f.size / 1024);
+      toast(`Análisis físico importado (${d.segs.length} recorridos)`);
+      if (!SB.c && kb > 200) toast("Archivo grande: en esta versión puede no guardarse en la nube. Usá Aro en tu sitio.", "warn");
+    } catch { toast("Ese archivo no es un análisis físico de Aro", "err"); }
+  };
+  inp.click();
 }
 
 /* ---------- IA ---------- */
@@ -1626,6 +1766,13 @@ function shareDialog(g) {
 /* ---------- Exportar ---------- */
 const slug = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
 async function saveFile(filename, data) {
+  if (!window.claude) {
+    // Aro en un sitio propio: descarga normal del navegador
+    const type = filename.endsWith(".json") ? "application/json" : "text/csv";
+    const url = URL.createObjectURL(new Blob([filename.endsWith(".csv") ? "\ufeff" + data : data], { type: type + ";charset=utf-8" }));
+    const a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000); toast("Archivo descargado"); return;
+  }
   if (S.downloads) {
     try { await S.downloads.save({ filename, data }); toast("Archivo listo"); return; }
     catch (e) { if (e && e.code === "declined") return; if (e && e.code === "rate_limited") { toast("Esperá un momento y probá de nuevo", "warn"); return; } }
@@ -1724,7 +1871,11 @@ async function loadSeeds() {
         const ex = S.games[f.id];
         if (ex && f.yt && !ex.yt) { ex.yt = f.yt; ex.ytUrl = "https://youtu.be/" + f.yt; touch(ex); toast("Video de YouTube vinculado a " + ex.us.name + " vs " + ex.opp.name); }
         const rk = f.id + "@" + (f.rev || 1);
-        if (ex && f.patch && f.rev && !seen.includes(rk)) { Object.assign(ex, f.patch); seen.push(rk); touch(ex); toast("Partido actualizado: " + ex.us.name + " vs " + ex.opp.name); if (route !== "inicio") render(); }
+        if (ex && f.rev && !seen.includes(rk) && (f.patch || f.replace)) {
+          if (f.patch) Object.assign(ex, f.patch);
+          if (f.replace) { try { const sg = await (await fetch("partidos/" + f.file, { cache: "no-store" })).json(); for (const key of f.replace) if (sg[key] !== undefined) ex[key] = sg[key]; } catch (e) { } }
+          seen.push(rk); touch(ex); toast("Partido actualizado: " + ex.us.name + " vs " + ex.opp.name); if (route !== "inicio") render();
+        }
         continue;
       }
       const gr = await fetch("partidos/" + f.file, { cache: "no-store" }); if (!gr.ok) continue;
