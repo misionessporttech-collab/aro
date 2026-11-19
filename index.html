@@ -1719,7 +1719,12 @@ async function loadSeeds() {
     const r = await fetch("partidos/index.json", { cache: "no-store" }); if (!r.ok) return;
     const list = await r.json(); const seen = lsGet("aro.seeded", []); let added = null;
     for (const f of list) {
-      if (seen.includes(f.id) || S.games[f.id]) { if (!seen.includes(f.id)) seen.push(f.id); continue; }
+      if (seen.includes(f.id) || S.games[f.id]) {
+        if (!seen.includes(f.id)) seen.push(f.id);
+        const ex = S.games[f.id];
+        if (ex && f.yt && !ex.yt) { ex.yt = f.yt; ex.ytUrl = "https://youtu.be/" + f.yt; touch(ex); toast("Video de YouTube vinculado a " + ex.us.name + " vs " + ex.opp.name); }
+        continue;
+      }
       const gr = await fetch("partidos/" + f.file, { cache: "no-store" }); if (!gr.ok) continue;
       const g = Object.assign(newGame(), await gr.json(), { updatedAt: Date.now() });
       S.games[g.id] = g; seen.push(g.id); added = g; touch(g);
