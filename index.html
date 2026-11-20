@@ -334,9 +334,9 @@ function zoneOf(x, y) {
 }
 const ZONES = { pintura: "Pintura", media: "Media distancia", c3izq: "Triple esquina (sup.)", c3der: "Triple esquina (inf.)", t3: "Triple frontal / 45°", back: "Campo propio" };
 
-function courtSVG({ id = "", cls = "court", half = false, inner = "", defs = "" } = {}) {
+function courtSVG({ id = "", cls = "court", half = false, inner = "", defs = "", under = "" } = {}) {
   const side = `
-    <rect x="0" y="5.05" width="5.8" height="4.9" fill="var(--paint)" stroke="var(--court-line)" stroke-width=".06"/>
+    <rect x="0" y="5.05" width="5.8" height="4.9" fill="${under ? "none" : "var(--paint)"}" stroke="var(--court-line)" stroke-width=".06"/>
     <circle cx="5.8" cy="7.5" r="1.8" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
     <path d="M1.575 6.25 A1.25 1.25 0 0 1 1.575 8.75" fill="none" stroke="var(--court-line)" stroke-width=".05"/>
     <path d="M0 0.9 H2.99 A6.75 6.75 0 0 1 2.99 14.1 H0" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
@@ -350,7 +350,7 @@ function courtSVG({ id = "", cls = "court", half = false, inner = "", defs = "" 
       ${defs}
     </defs>
     <rect x="-0.3" y="-0.3" width="28.6" height="15.6" rx=".25" fill="var(--floor)" stroke="var(--frame)" stroke-width=".05"/>
-    <rect x="0" y="0" width="28" height="15" fill="var(--floor)" stroke="var(--court-line)" stroke-width=".07"/>
+    <rect x="0" y="0" width="28" height="15" fill="var(--floor)"/>${under}<rect x="0" y="0" width="28" height="15" fill="none" stroke="var(--court-line)" stroke-width=".07"/>
     <line x1="14" y1="0" x2="14" y2="15" stroke="var(--court-line)" stroke-width=".06"/>
     <circle cx="14" cy="7.5" r="1.8" fill="none" stroke="var(--court-line)" stroke-width=".06"/>
     <g>${side}</g>
@@ -1525,15 +1525,37 @@ function drawShots() {
   $("#gZones").innerHTML = order.length ? `<table class="box zones"><thead><tr><th>Zona</th><th>Conv.</th><th>%</th><th>Pts/tiro</th><th>Del total</th></tr></thead><tbody>
     ${order.map(k => `<tr><td>${ZONES[k]}</td><td>${z[k].m}/${z[k].a}</td><td>${pct(z[k].m, z[k].a)}%</td><td>${(z[k].p / z[k].a).toFixed(2)}</td><td>${pct(z[k].a, shots.length)}%</td></tr>`).join("")}</tbody></table>` : `<p class="small muted">Sin tiros ubicados con estos filtros.</p>`;
 }
+/* Mapa de calor suave: acumula en una grilla fina (10 cm), difumina con un núcleo gaussiano y pinta en un canvas. */
+const HEAT_STOPS = [[0, 253, 230, 138, 0], [0.18, 253, 214, 102, 0.55], [0.45, 245, 150, 40, 0.75], [0.72, 220, 50, 38, 0.85], [1, 122, 20, 30, 0.92]];
+function heatImage(points, sigma) {
+  const R = 10, W = 28 * R, H = 15 * R, a = new Float32Array(W * H);
+  for (const [x, y, w = 1] of points) { const X = Math.floor(x * R), Y = Math.floor(y * R); if (X >= 0 && Y >= 0 && X < W && Y < H) a[Y * W + X] += w; }
+  const sg = sigma * R, rad = Math.ceil(sg * 3), k = []; let ks = 0;
+  for (let i = -rad; i <= rad; i++) { const v = Math.exp(-i * i / (2 * sg * sg)); k.push(v); ks += v; }
+  for (let i = 0; i < k.length; i++) k[i] /= ks;
+  const b = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = a[y * W + x]; if (!v) continue; for (let i = -rad; i <= rad; i++) { const X = x + i; if (X >= 0 && X < W) b[y * W + X] += v * k[i + rad]; } }
+  a.fill(0);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const v = b[y * W + x]; if (!v) continue; for (let i = -rad; i <= rad; i++) { const Y = y + i; if (Y >= 0 && Y < H) a[Y * W + x] += v * k[i + rad]; } }
+  let max = 0; for (const v of a) if (v > max) max = v;
+  if (!max) return "";
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(W, H), d = img.data;
+  for (let i = 0; i < a.length; i++) {
+    const t = Math.pow(a[i] / max, 0.75); if (t < 0.04) continue;
+    let j = 1; while (j < HEAT_STOPS.length - 1 && HEAT_STOPS[j][0] < t) j++;
+    const s0 = HEAT_STOPS[j - 1], s1 = HEAT_STOPS[j], f = (t - s0[0]) / (s1[0] - s0[0] || 1);
+    d[i * 4] = s0[1] + (s1[1] - s0[1]) * f; d[i * 4 + 1] = s0[2] + (s1[2] - s0[2]) * f; d[i * 4 + 2] = s0[3] + (s1[3] - s0[3]) * f;
+    d[i * 4 + 3] = 255 * Math.min(1, (s0[4] + (s1[4] - s0[4]) * f) * Math.min(1, t / 0.12));
+  }
+  ctx.putImageData(img, 0, 0);
+  return `<image href="${cv.toDataURL()}" x="0" y="0" width="28" height="15" preserveAspectRatio="none"/>`;
+}
 function drawHeat() {
   const g = cur(), el = $("#gHeat"); if (!el) return;
   const evs = g.events.filter(e => e.team === "us" && e.x != null && e.type !== "ft" && inPer(g, e, GV.per) && (!GV.player || e.j === GV.player || (e.type === "fg" && String(e.d.ast) === GV.player)));
-  const NX = 28, NY = 15, grid = Array.from({ length: NX * NY }, () => 0);
-  for (const e of evs) { const [mx, my] = toM(e.x, e.y); for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) { const gx = Math.floor(mx) + dx, gy = Math.floor(my) + dy; if (gx < 0 || gy < 0 || gx >= NX || gy >= NY) continue; const w = Math.exp(-(dx * dx + dy * dy) / 2.2); grid[gy * NX + gx] += w; } }
-  const max = Math.max(0.0001, ...grid);
-  let inner = "";
-  grid.forEach((v, i) => { if (v / max < 0.06) return; const x = i % NX, y = Math.floor(i / NX), a = v / max; const hue = 50 - a * 50; inner += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="hsl(${hue},95%,${52 - a * 10}%)" opacity="${(0.25 + a * 0.6).toFixed(2)}"/>`; });
-  el.innerHTML = courtSVG({ cls: "court", inner }).replace('class="court"', 'class="court" style="cursor:default"');
+  const under = heatImage(evs.map(e => toM(e.x, e.y)), 1.3);
+  el.innerHTML = courtSVG({ cls: "court", under }).replace('class="court"', 'class="court" style="cursor:default"');
   $("#gHeatSub").textContent = `${evs.length} acciones`;
 }
 function highlightList(g) {
@@ -1649,24 +1671,17 @@ function drawFisico() {
 }
 function drawFisHeat() {
   const g = cur(), el = $("#fisHeat"); if (!el) return;
-  const NX = 28, NY = 15, grid = new Float32Array(NX * NY);
+  const pts = [];
   for (const s of g.fisico.segs) {
     if (s.team !== "us") continue;
     if (FIS.sel && (s.j || "?") !== FIS.sel) continue;
     for (let i = 0; i < s.x.length; i++) {
       let x = s.x[i] / 10, y = s.y[i] / 10; const t = s.t0 + i / s.hz;
       if (!attackRight(g, t)) { x = 28 - x; y = 15 - y; }
-      const gx = Math.floor(x), gy = Math.floor(y);
-      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
-        const X = gx + dx, Y = gy + dy; if (X < 0 || Y < 0 || X >= NX || Y >= NY) continue;
-        grid[Y * NX + X] += dx || dy ? 0.4 : 1;
-      }
+      pts.push([x, y]);
     }
   }
-  const max = Math.max(1e-6, ...grid);
-  let inner = "";
-  grid.forEach((v, i) => { const a = v / max; if (a < 0.05) return; const x = i % NX, y = Math.floor(i / NX); inner += `<rect x="${x}" y="${y}" width="1.02" height="1.02" fill="hsl(${50 - a * 50},95%,${52 - a * 10}%)" opacity="${(0.25 + a * 0.6).toFixed(2)}"/>`; });
-  el.innerHTML = courtSVG({ cls: "court", inner }).replace('class="court"', 'class="court" style="cursor:default"');
+  el.innerHTML = courtSVG({ cls: "court", under: heatImage(pts, 0.9) }).replace('class="court"', 'class="court" style="cursor:default"');
 }
 function fisImport() {
   const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".json,application/json";
