@@ -36,7 +36,13 @@ def auto_crop(video, W, H, dur):
         m = f.astype(np.float32).mean(2)
         acc = m if acc is None else np.maximum(acc, m)
     cols = np.where(acc.mean(0) > 12)[0]; rows = np.where(acc.mean(1) > 12)[0]
-    return [int(cols.min()), int(rows.min()), int(cols.max()) + 1, int(rows.max()) + 1]
+    return even_crop([int(cols.min()), int(rows.min()), int(cols.max()) + 1, int(rows.max()) + 1])
+
+def even_crop(c):
+    """FFmpeg recorta en números pares con video 4:2:0: si el recorte es impar, el cuadro sale de otro tamaño."""
+    x1, y1 = c[0] + (c[0] & 1), c[1] + (c[1] & 1)
+    x2, y2 = x1 + ((c[2] - x1) // 2) * 2, y1 + ((c[3] - y1) // 2) * 2
+    return [x1, y1, x2, y2]
 
 def main():
     ap = argparse.ArgumentParser()
@@ -54,7 +60,7 @@ def main():
 
     # 1) recorte y calibración
     cp = os.path.join(a.out, "crop.json")
-    crop = json.load(open(cp)) if os.path.exists(cp) else auto_crop(a.video, W, H, dur)
+    crop = even_crop(json.load(open(cp))) if os.path.exists(cp) else auto_crop(a.video, W, H, dur)
     json.dump(crop, open(cp, "w"))
     cw, ch = crop[2] - crop[0], crop[3] - crop[1]
     print("zona útil:", crop, f"({cw}x{ch})")
@@ -62,6 +68,7 @@ def main():
     if not os.path.exists(calp):
         import calib
         frame = grab(a.video, dur * 0.3, W, H, crop)
+        if frame is None: raise SystemExit("No pude leer un cuadro del video para calibrar la cancha (¿el archivo está completo?).")
         cv2.imwrite(os.path.join(a.out, "cuadro_calibracion.png"), frame)
         base = json.load(open(a.calib_base))
         p = calib.refit_auto(frame, base, os.path.join(a.out, "calib_vis.jpg"))
