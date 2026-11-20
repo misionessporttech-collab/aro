@@ -31,6 +31,10 @@ a{color:var(--mark)}
 .brand{display:flex;align-items:center;gap:9px;font:800 26px/1 var(--disp);letter-spacing:.02em;cursor:pointer}
 .brand i.x{width:20px;height:20px;border-radius:50%;border:3px solid #fff;display:inline-block;position:relative}
 .brand i.x:after{content:"";position:absolute;left:3px;right:3px;top:100%;height:7px;margin-top:-1px;border:2px solid #fff;border-top:0;border-radius:0 0 4px 4px;opacity:.55}
+.brand .by{font:500 12px/1 var(--body);color:#a9b5c2;letter-spacing:0;align-self:flex-end;margin:0 0 4px 2px;white-space:nowrap}
+.foot{max-width:1320px;margin:-50px auto 0;padding:22px 20px 34px;border-top:1px solid var(--line2);font-size:13px;color:var(--muted)}
+.foot span{font:800 16px var(--disp);color:var(--ink)}
+.foot b{color:var(--ink);font-weight:600}
 .nav{display:flex;gap:2px;align-self:stretch}
 .nav button{background:none;border:0;color:#a9b5c2;padding:0 14px;cursor:pointer;font-weight:600;box-shadow:inset 0 -3px 0 transparent}
 .nav button:hover{color:#fff}
@@ -217,7 +221,7 @@ table.box tr.tot td:first-child{font-weight:700}
   .hero h1{font-size:50px}
 }
 @media (max-width:640px){
-  .save-state span{display:none}.top{gap:12px;padding:0 12px}.nav button{padding:0 8px}
+  .save-state span{display:none}.brand .by{display:none}.top{gap:12px;padding:0 12px}.nav button{padding:0 8px}
   .ghead .top-part{grid-template-columns:1fr 1fr;min-height:0}
   .ghead .board{grid-column:1/-1;grid-row:1;padding:16px}
   .ghead .team{padding:12px 14px}
@@ -235,7 +239,7 @@ table.box tr.tot td:first-child{font-weight:700}
 </head>
 <body>
 <header class="top">
-  <div class="brand" data-go="inicio"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="7" rx="9" ry="3.2" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M4.5 9.5 7 21h10l2.5-11.5M8.5 10l1.5 11M15.5 10 14 21M6 15h12" fill="none" stroke="#fff" stroke-width="1.3" opacity=".6"/></svg>Aro</div>
+  <div class="brand" data-go="inicio"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="7" rx="9" ry="3.2" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M4.5 9.5 7 21h10l2.5-11.5M8.5 10l1.5 11M15.5 10 14 21M6 15h12" fill="none" stroke="#fff" stroke-width="1.3" opacity=".6"/></svg>Aro<small class="by">by Misiones Sport Tech</small></div>
   <nav class="nav">
     <button data-go="inicio">Partidos</button>
     <button data-go="etiquetar">Etiquetar</button>
@@ -246,6 +250,7 @@ table.box tr.tot td:first-child{font-weight:700}
   <div class="row" id="authBox" style="gap:6px;flex-wrap:nowrap"></div>
 </header>
 <main id="app"></main>
+<footer class="foot"><span>Aro</span> es una herramienta de <b>Misiones Sport Tech</b>, Posadas, Misiones.</footer>
 <div class="toast-box" id="toasts"></div>
 <input type="file" id="videoInput" accept="video/*" class="hidden">
 <input type="file" id="jsonInput" accept=".json,application/json" class="hidden">
