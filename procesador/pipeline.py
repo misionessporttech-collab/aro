@@ -139,6 +139,7 @@ def main():
     if batch: flush(batch)
     json.dump(dets, open(dp, "w")); json.dump(feats, open(fp, "w"))
     print("detección completa:", len(dets), "cuadros")
+    open(os.path.join(a.out, "deteccion_completa.txt"), "w").write(str(len(dets)))
 
 if __name__ == "__main__":
     main()

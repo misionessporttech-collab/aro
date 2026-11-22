@@ -15,6 +15,8 @@ def main():
     ap.add_argument("--video", required=True); ap.add_argument("--salida", required=True)
     ap.add_argument("--desde", type=float, default=0); ap.add_argument("--hasta", type=float, default=0)
     ap.add_argument("--ancho", type=int, default=1920); ap.add_argument("--vy", type=float, default=0.55)
+    ap.add_argument("--codec", default="libx264", help="h264_nvenc usa la placa NVIDIA (mucho más rápido)")
+    ap.add_argument("--archivo", default="", help="ruta del video de salida (por defecto, en la carpeta de salida)")
     a = ap.parse_args()
     crop = json.load(open(os.path.join(a.salida, "crop.json")))
     E = json.load(open(os.path.join(a.salida, "etiquetas.json")))
@@ -29,9 +31,10 @@ def main():
            "-vf", f"fps={out_fps},crop={cw}:{ch}:{crop[0]}:{crop[1]},scale={OW}:{OH}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
     outp = subprocess.Popen(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{OW}x{OH}", "-r", str(out_fps), "-i", "-",
-                             "-i", a.video, "-ss", str(a.desde), "-map", "0:v", "-map", "1:a?", "-shortest",
-                             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-                             os.path.join(a.salida, "panoramica_con_etiquetas.mp4")], stdin=subprocess.PIPE)
+                             "-ss", str(a.desde), "-i", a.video, "-map", "0:v", "-map", "1:a?", "-shortest",
+                             *(["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"] if a.codec == "h264_nvenc" else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]),
+                             "-pix_fmt", "yuv420p",
+                             a.archivo or os.path.join(a.salida, "panoramica_con_etiquetas.mp4")], stdin=subprocess.PIPE)
     mw = int(OW * 0.19); ms = mw / 28.0; mh = int(15 * ms)
     n = 0
     while True:
@@ -68,9 +71,14 @@ def main():
             cv2.circle(img, L(X, Y), 5, col, -1); cv2.circle(img, L(X, Y), 5, (20, 20, 20), 1)
             if tc == 0 and lbl.startswith("#"):
                 cv2.putText(img, lbl.split()[0][1:], (L(X, Y)[0] + 6, L(X, Y)[1] + 4), 0, 0.36, (255, 255, 255), 1, cv2.LINE_AA)
-        outp.stdin.write(img.tobytes()); n += 1
-    outp.stdin.close(); outp.wait()
-    print("video listo:", os.path.join(a.salida, "panoramica_con_etiquetas.mp4"), n, "cuadros")
+        try: outp.stdin.write(img.tobytes())
+        except BrokenPipeError: break
+        n += 1
+    try: outp.stdin.close()
+    except BrokenPipeError: pass
+    if outp.wait() != 0 or n == 0:
+        raise SystemExit("no se pudo generar el video (codificador " + a.codec + ")")
+    print("video listo:", a.archivo or os.path.join(a.salida, "panoramica_con_etiquetas.mp4"), n, "cuadros")
 
 if __name__ == "__main__":
     main()

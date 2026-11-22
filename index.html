@@ -175,6 +175,7 @@ kbd{display:inline-block;min-width:22px;text-align:center;font:700 12px/1 var(--
 .clip{display:grid;grid-template-columns:54px 34px 46px 1fr auto;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer;align-items:center}
 .clip:hover{background:#eef2f6}
 .clip.now{background:#e3ebf8}
+.fis-warn{margin:10px 0 4px;padding:10px 14px;border-left:3px solid #c98a12;background:#fbf3e2;font-size:14px;border-radius:0 4px 4px 0}
 .clip.idrow{grid-template-columns:110px 70px minmax(0,1fr) auto}
 .clip.idrow select{min-width:0;width:100%}
 table.box{width:100%;border-collapse:collapse;font-size:14px}
@@ -231,7 +232,8 @@ table.box tr.tot td:first-child{font-weight:700}
   .kpi:nth-child(n+3){border-top:1px solid var(--line)}
   .bigscore{font-size:68px}
   .hero h1{font-size:42px}
-  .clip.idrow{grid-template-columns:1fr auto;row-gap:4px}
+  .fis-warn{margin:10px 0 4px;padding:10px 14px;border-left:3px solid #c98a12;background:#fbf3e2;font-size:14px;border-radius:0 4px 4px 0}
+.clip.idrow{grid-template-columns:1fr auto;row-gap:4px}
   .clip.idrow select{grid-column:1/2}
   label.f input{min-width:0;width:100%}
 }
@@ -694,6 +696,28 @@ function ytIdFrom(s) {
   return m ? m[1] : null;
 }
 const PL = { yt: null, ytReady: false, ytId: null, api: null, wrap: null, shield: null };
+/* Vista panorámica: segundo video (la panorámica con nombres que genera el procesador).
+   Toda la app trabaja en "tiempo del video principal"; P convierte cuando se ve la panorámica. */
+const VIEW = { pano: false };
+const panoOK = g => !!(g && g.yt2 && g.fisico && g.fisico.sync && g.fisico.sync.length);
+const activeYt = g => (g && VIEW.pano && panoOK(g)) ? g.yt2 : (g && g.yt);
+function panoOff(g, tp) { const k = g.fisico.sync; return interp(tp, k.map(a => a[0]), k.map(a => a[1])); }
+function interp(x, xs, ys) {
+  if (xs.length === 1 || x <= xs[0]) return ys[0];
+  for (let i = 1; i < xs.length; i++) if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+  return ys[ys.length - 1];
+}
+const toMain = (g, tp) => tp + panoOff(g, tp);
+function toPano(g, t) { let tp = t - g.fisico.T0; for (let i = 0; i < 4; i++) tp = t - panoOff(g, tp); return tp; }
+function setView(pano) {
+  const g = cur(); if (!panoOK(g) || VIEW.pano === pano) return;
+  const t = hasVideo() ? P.time() : 0, playing = hasVideo() && !P.paused();
+  VIEW.pano = pano;
+  const id = activeYt(g), start = Math.max(0, pano ? toPano(g, t) : t);
+  if (PL.yt && PL.ytReady) { PL.ytId = id; playing ? PL.yt.loadVideoById({ videoId: id, startSeconds: start }) : PL.yt.cueVideoById({ videoId: id, startSeconds: start }); }
+  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", (b.dataset.view === "pano") === pano));
+  placeYT();
+}
 function loadYTApi() {
   if (PL.api) return; PL.api = "loading";
   window.onYouTubeIframeAPIReady = () => { PL.api = "ok"; ensureYT(); };
@@ -704,6 +728,8 @@ function loadYTApi() {
 }
 function ensureYT() {
   const g = cur(); if (!g || !g.yt || PL.api !== "ok" || !window.YT || !YT.Player) return;
+  if (VIEW.pano && (!panoOK(g) || route !== "analisis")) VIEW.pano = false;
+  const vid = activeYt(g);
   if (!PL.wrap) {
     PL.wrap = document.createElement("div"); PL.wrap.id = "ytWrap";
     PL.wrap.innerHTML = `<div id="ytPlayer"></div><div class="yt-shield" title="Clic: play / pausa"></div>`;
@@ -712,23 +738,23 @@ function ensureYT() {
     PL.shield.addEventListener("click", () => togglePlay());
   }
   if (!PL.yt) {
-    PL.ytId = g.yt; PL.ytReady = false;
+    PL.ytId = vid; PL.ytReady = false;
     PL.yt = new YT.Player("ytPlayer", {
-      videoId: g.yt, width: "100%", height: "100%",
+      videoId: vid, width: "100%", height: "100%",
       playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1, iv_load_policy: 3 },
       events: {
         onReady: () => { PL.ytReady = true; placeYT(); if (route === "etiquetar") updateTagClock(); const n = $("#gNow"); if (n && !n.textContent) n.textContent = "Elegí una jugada o reproducí la selección"; },
         onError: () => toast("YouTube no pudo cargar el video. Revisá que el link sea correcto y que el video no sea privado.", "err")
       }
     });
-  } else if (PL.ytId !== g.yt && PL.ytReady) { PL.ytId = g.yt; PL.yt.cueVideoById(g.yt); }
+  } else if (PL.ytId !== vid && PL.ytReady) { PL.ytId = vid; PL.yt.cueVideoById(vid); }
   placeYT();
 }
 function placeYT() {
   if (!PL.wrap) return;
   const box = $(".ytbox");
   const g = cur();
-  if (!box || !g || !g.yt || V.url || g.yt !== PL.ytId) {
+  if (!box || !g || !g.yt || V.url || activeYt(g) !== PL.ytId) {
     if (PL.wrap.style.display !== "none") { PL.wrap.style.display = "none"; if (PL.ytReady) try { PL.yt.pauseVideo(); } catch (e) { } }
     return;
   }
@@ -746,17 +772,17 @@ const ytLink = (g, t) => `https://youtu.be/${g.yt}?t=${Math.max(0, Math.floor(t)
 function srcKind() {
   if (V.url) return "file";
   const g = cur();
-  if (g && g.yt && PL.ytReady && PL.ytId === g.yt) return "yt";
+  if (g && g.yt && PL.ytReady && PL.ytId === activeYt(g)) return "yt";
   return null;
 }
 const hasVideo = () => !!srcKind();
 const P = {
-  time() { const k = srcKind(); return k === "file" ? video.currentTime : k === "yt" ? (PL.yt.getCurrentTime() || 0) : 0; },
-  set(t) { const k = srcKind(); t = Math.max(0, t); if (k === "file") video.currentTime = Math.min(t, video.duration || t); else if (k === "yt") PL.yt.seekTo(t, true); },
+  time() { const k = srcKind(); if (k === "file") return video.currentTime; if (k !== "yt") return 0; const t = PL.yt.getCurrentTime() || 0; return VIEW.pano ? toMain(cur(), t) : t; },
+  set(t) { const k = srcKind(); t = Math.max(0, t); if (k === "file") video.currentTime = Math.min(t, video.duration || t); else if (k === "yt") PL.yt.seekTo(VIEW.pano ? Math.max(0, toPano(cur(), t)) : t, true); },
   play() { const k = srcKind(); if (k === "file") video.play().catch(() => { }); else if (k === "yt") PL.yt.playVideo(); },
   pause() { const k = srcKind(); if (k === "file") video.pause(); else if (k === "yt") PL.yt.pauseVideo(); },
   paused() { const k = srcKind(); if (k === "file") return video.paused; if (k === "yt") { const s = PL.yt.getPlayerState(); return s !== 1 && s !== 3; } return true; },
-  dur() { const k = srcKind(); return k === "file" ? (video.duration || 0) : k === "yt" ? (PL.yt.getDuration() || 0) : 0; },
+  dur() { const k = srcKind(); if (k === "file") return video.duration || 0; if (k !== "yt") return 0; const d = PL.yt.getDuration() || 0; return VIEW.pano ? toMain(cur(), d) : d; },
   rate(r) { const k = srcKind(); if (r == null) return k === "yt" ? PL.yt.getPlaybackRate() : video.playbackRate; if (k === "file") video.playbackRate = r; else if (k === "yt") PL.yt.setPlaybackRate(r); },
   rates() { return srcKind() === "yt" ? (PL.yt.getAvailablePlaybackRates() || [1]) : [0.5, 0.75, 1, 1.25, 1.5, 2, 3]; }
 };
@@ -1182,6 +1208,8 @@ function renderTagTab() {
         <label class="f">Marcador oficial ${esc(g.opp.name)} (opcional)<input type="number" min="0" id="sOffOpp" value="${g.official?.opp ?? ""}" placeholder="Se calcula de las jugadas"></label>
       </div>
       <label class="f">Link de YouTube del partido<input class="inp" id="sYt" value="${esc(g.ytUrl || (g.yt ? "https://youtu.be/" + g.yt : ""))}" placeholder="https://youtu.be/…"></label>
+      <label class="f">Link de YouTube de la panorámica con nombres (opcional)<input class="inp" id="sYt2" value="${esc(g.yt2 ? "https://youtu.be/" + g.yt2 : "")}" placeholder="El video que genera el procesador, subido a YouTube"></label>
+      ${g.yt2 && !(g.fisico && g.fisico.sync) ? `<p class="small muted" style="margin:-4px 0 0">Para cambiar de vista hace falta importar antes el análisis físico de este partido: de ahí sale la sincronización entre los dos videos.</p>` : ""}
       <div><div class="eyebrow" style="margin-bottom:6px">Sincronización del video</div>
         <div class="row"><label class="f" style="width:170px">Desfase (segundos)<input class="inp" type="number" step="0.1" id="sOff" value="${g.vOffset || 0}"></label>
         <button class="btn sm" id="sSync" ${TG.sel ? "" : "disabled"}>La jugada elegida ocurre ahora en el video</button></div>
@@ -1197,6 +1225,7 @@ function renderTagTab() {
     $("#sComp").onchange = upd(() => g.comp = $("#sComp").value.trim());
     $("#sRoster").onchange = upd(() => g.roster = parseRoster($("#sRoster").value));
     $("#sOff").onchange = upd(() => g.vOffset = r2(+$("#sOff").value || 0));
+    $("#sYt2").onchange = () => { const v = $("#sYt2").value.trim(); const id = ytIdFrom(v); if (v && !id) { toast("Ese link no parece de YouTube", "err"); return; } g.yt2 = id; VIEW.pano = false; touch(g); toast(id ? "Panorámica vinculada: cambiá de vista en Análisis" : "Panorámica quitada"); };
     $("#sYt").onchange = () => { const v = $("#sYt").value.trim(); const id = ytIdFrom(v); if (v && !id) { toast("Ese link no parece de YouTube", "err"); return; } g.yt = id; g.ytUrl = v; touch(g); toast(id ? "Video de YouTube vinculado" : "Video de YouTube quitado"); renderTag(); };
     $("#sSync").onclick = () => { const e = g.events.find(x => x.id === TG.sel); if (!e || !hasVideo()) { toast("Elegí una jugada y vinculá el video", "warn"); return; } g.vOffset = r2(P.time() - e.t); touch(g); renderTagTab(); toast(`Desfase ajustado a ${g.vOffset} s`); };
     $("#sOffUs").onchange = upd(() => g.official.us = $("#sOffUs").value === "" ? null : +$("#sOffUs").value);
@@ -1345,7 +1374,7 @@ function renderGame() {
       <div class="fv-left">
         <div class="sec-title"><h2>Vista de cancha</h2><span class="small muted">Sólido = bien · Punteado = mal · Clic = ver jugada</span></div>
         <div class="court-wrap" id="gCourt"></div>
-        <div style="margin-top:12px"><div class="vbox" id="gVideo"></div>
+        <div style="margin-top:12px">${panoOK(g) ? `<div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="small muted">Vista del video</span><div class="seg"><button data-view="main" class="${VIEW.pano ? "" : "on"}">Transmisión</button><button data-view="pano" class="${VIEW.pano ? "on" : ""}">Panorámica con nombres</button></div></div>` : ""}<div class="vbox" id="gVideo"></div>
           <div class="row" style="margin-top:8px;justify-content:space-between">
             <div class="small" id="gNow" style="font-weight:600">${hasVideo() ? "Elegí una jugada o reproducí la selección" : ""}</div>
             <div class="row"><button class="btn sm" id="gPrev">◀︎</button><button class="btn sm pri" id="gPlayAll">▶ Reproducir selección</button><button class="btn sm" id="gNext">▶︎</button></div>
@@ -1400,6 +1429,7 @@ function renderGame() {
   $("#fPer").onchange = e => { GV.per = e.target.value; drawField(); drawShots(); drawHeat(); };
   $("#fPl").onchange = e => { setPlayer(e.target.value); };
   mountVideo($("#gVideo"));
+  document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view === "pano"));
   V.onClip = e => { GV.nowId = e ? e.id : null; const el = $("#gNow"); if (el) el.textContent = e ? `${V.playlist ? `(${V.idx + 1}/${V.playlist.length}) ` : ""}${fmtT(e.t)} · ${e.team === "opp" ? g.opp.name : playerName(g, e.j)} · ${describe(g, e)}` : "Fin de la selección"; $$(".clip").forEach(c => c.classList.toggle("now", c.dataset.clip === GV.nowId)); };
   $("#gPlayAll").onclick = () => playList(g, filtered(g));
   $("#gPrev").onclick = () => V.playlist ? nextInList(-1) : null;
@@ -1641,6 +1671,7 @@ function drawFisico() {
       ${row("Total " + esc(g.us.name), tot, "tot")}
       ${A.opp ? row(`<span class="muted">${esc(g.opp.name)} (total)</span>`, { ...A.opp, byP: A.opp.byP }) : ""}
     </tbody></table></div>
+    ${F.identidad && F.identidad.acierto < 0.8 ? `<div class="fis-warn"><b>Números por jugador: orientativos.</b> En este partido el sistema reconoce a cada jugador solo el ${Math.round(F.identidad.cobertura * 100)} % del tiempo y, en la prueba interna, acierta el número el ${Math.round(F.identidad.acierto * 100)} % de las veces. Los totales de cada equipo y por cuarto sí son confiables.</div>` : ""}
     <p class="small muted">Alta intensidad: metros a más de ${kmh(F.umbral_alta || 5)} km/h. Sprint: más de ${kmh(F.umbral_sprint || 5.5)} km/h sostenido 1 s. Las métricas salen del video, con un margen aproximado de ±5-10 %. Clic en un jugador para resaltarlo.</p>
     <div class="two-col" style="margin-top:12px">
       <div><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Minimapa</b><span class="small muted" id="fisClock"></span></div>

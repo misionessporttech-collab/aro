@@ -49,7 +49,7 @@ if not exist "%ARO%\entorno\Scripts\python.exe" "%UV%" venv "%ARO%\entorno" --py
 if errorlevel 1 goto fallo
 "%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" torch torchvision --index-url https://download.pytorch.org/whl/cu124
 if errorlevel 1 goto fallo
-"%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" ultralytics opencv-python scipy scikit-learn numpy
+"%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" ultralytics opencv-python scipy scikit-learn numpy orjson
 if errorlevel 1 goto fallo
 
 echo [6/6] Probando la placa de video desde Python...
@@ -57,6 +57,7 @@ echo [6/6] Probando la placa de video desde Python...
 if errorlevel 1 (pause & exit /b 1)
 
 copy /y "%ARO%\programa\windows\procesar.bat" "%ARO%\procesar.bat" >nul
+copy /y "%ARO%\programa\windows\generar_video.bat" "%ARO%\generar_video.bat" >nul
 
 echo.
 echo  ===========================================================

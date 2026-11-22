@@ -15,3 +15,15 @@ OBS Studio, ventana del navegador con el reproductor de Veo en vista panorámica
 
 ## Precisión
 Posición: unos 15 cm en la cancha de Mitre. Distancia: ±5-10 %. La velocidad máxima conviene tomarla como referencia. La identidad mejora con más jugadas etiquetadas; los tramos dudosos se corrigen en Aro (Rendimiento físico → Revisar identidades).
+
+## En la PC (Windows con placa NVIDIA)
+
+1. Doble clic en `windows/instalar.bat` (una sola vez): instala todo en `%USERPROFILE%\Aro`.
+2. Por cada partido, una carpeta en `Aro\partidos\` con la grabación panorámica y el respaldo `.json` exportado de Aro.
+3. `Aro\procesar.bat`: detección (la parte larga, con la placa de video) y análisis. Se actualiza solo desde GitHub.
+   Si la detección ya está hecha, la reutiliza y el análisis tarda menos de un minuto.
+4. `Aro\generar_video.bat` (opcional): arma `panoramica_con_nombres.mp4` para subir a YouTube y verla en Aro
+   con el botón "Panorámica con nombres".
+
+`fisico.json` incluye `identidad`: qué parte del tiempo tiene número asignado y una prueba interna de acierto
+(se esconden jugadas, se identifica con el resto y se mide). Aro avisa cuando el acierto es bajo.

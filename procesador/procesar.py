@@ -7,7 +7,7 @@ recorridos de cada jugador, identidad por camiseta, métricas físicas y posicio
 Uso:
   python procesar.py --partido respaldo.json [--dets dets.json --feats feats.json --calib calib.json --out fisico.json]
 """
-import argparse, json, os, numpy as np
+import argparse, json, os, pickle, time, numpy as np
 from scipy.optimize import linear_sum_assignment
 from scipy.signal import savgol_filter
 from sklearn.cluster import KMeans
@@ -43,19 +43,34 @@ def aro_events(game):
 
 
 # ---------------------------------------------------------------- detecciones
+def _read_json(path):
+    try:
+        import orjson
+        with open(path, "rb") as f: return orjson.loads(f.read())
+    except ImportError:
+        return json.load(open(path))
+
 def load(dets_path, feats_path, calib_path):
-    dets = json.load(open(dets_path)); fe = json.load(open(feats_path))
-    n = min(len(dets), len(fe))
+    """Carga detecciones y colores por partes para no agotar la memoria con partidos completos."""
+    import gc
+    dets = _read_json(dets_path)
+    cnt = np.array([len(d["b"]) for d in dets], np.int64)
+    B = np.array([b for d in dets for b in d["b"]], np.float32).reshape(-1, 5)
+    nD = len(dets); del dets; gc.collect()
+    fe = _read_json(feats_path)
+    nF = min(nD, len(fe))
+    ok_f = np.array([len(fe[i]) == cnt[i] for i in range(nF)])
+    F = np.array([c for i in range(nF) if ok_f[i] for c in fe[i]], np.float32)
+    del fe; gc.collect()
+    fidx = np.repeat(np.arange(nD), cnt)
+    keep = (fidx < nF) & np.repeat(np.r_[ok_f, np.zeros(nD - nF, bool)], cnt)
+    fidx, B = fidx[keep], B[keep]
+    x1, y1, x2, y2, cf = B.T
+    R = np.c_[fidx, cf, (x1 + x2) / 2, y2, x1, y1, x2, y2, F].astype(np.float64)
     M = Mapper(json.load(open(calib_path))["params"])
-    rows = []
-    for fi in range(n):
-        for b, c in zip(dets[fi]["b"], fe[fi]):
-            x1, y1, x2, y2, cf = b
-            rows.append([fi, cf, (x1 + x2) / 2, y2, x1, y1, x2, y2, *c])
-    R = np.array(rows)
     XY = M.to_court(R[:, 2:4])
     ok = (XY[:, 0] > -1.0) & (XY[:, 0] < CW + 1.0) & (XY[:, 1] > -0.35) & (XY[:, 1] < CH + 0.8) & (R[:, 15] >= 15)
-    return R[ok], XY[ok], n
+    return R[ok], XY[ok], nF
 
 def classify(R):
     F = R[:, 8:15]  # gold, white, red, dark, blue, medB, medL
@@ -81,7 +96,9 @@ def near_edge(p):
 
 def track(R, XY, team, nF):
     NS = {"us": 5, "opp": 5, "ref": 3}
-    by_f = [np.where(R[:, 0] == f)[0] for f in range(nF)]
+    fr = R[:, 0].astype(np.int64)
+    order = np.argsort(fr, kind="stable"); cuts = np.searchsorted(fr[order], np.arange(nF + 1))
+    by_f = [order[cuts[f]:cuts[f + 1]] for f in range(nF)]
     slots = {k: [] for k in NS}; done = []; nid = 0
     for f in range(nF):
         ids = by_f[f]
@@ -122,11 +139,18 @@ def split_on_contact(tracks, dmin=0.9, nmin=2):
     for t in tracks: by_team.setdefault(t.team, []).append(t)
     for team, ts in by_team.items():
         cuts = {t.id: set() for t in ts}
-        for i in range(len(ts)):
-            for j in range(i + 1, len(ts)):
+        span = [(min(t.pts), max(t.pts)) for t in ts]
+        arr = [(np.array(sorted(t.pts)), np.array([t.pts[k] for k in sorted(t.pts)])) for t in ts]
+        order = sorted(range(len(ts)), key=lambda i: span[i][0])
+        for oi, i in enumerate(order):
+            for j in order[oi + 1:]:
+                if span[j][0] > span[i][1]: break
                 a, b = ts[i], ts[j]
-                common = sorted(set(a.pts) & set(b.pts))
-                close = [f for f in common if np.linalg.norm(a.pts[f] - b.pts[f]) < dmin]
+                (fa, pa), (fb, pb) = arr[i], arr[j]
+                common, ia, ib = np.intersect1d(fa, fb, assume_unique=True, return_indices=True)
+                if not len(common): continue
+                dd = np.linalg.norm(pa[ia] - pb[ib], axis=1)
+                close = [int(f) for f in common[dd < dmin]]
                 run = []
                 for f in close + [10**9]:
                     if run and f - run[-1] > 3:
@@ -258,6 +282,35 @@ def identify(tracks, evs, knots, nF):
     return ident, conf
 
 
+def ident_quality(tracks, evs, knots, nF, seeds=4, frac=0.3):
+    """Prueba interna: esconde parte de las jugadas, identifica con el resto y mide cuántas
+    de las escondidas caen sobre un recorrido con el número correcto."""
+    import random
+    us = [t for t in tracks if t.team == "us"]
+    span = [(min(t.pts), max(t.pts)) for t in us]
+    ev_j = [e for e in evs if e[1]]
+    ok = bad = unk = 0
+    for sd in range(seeds):
+        rnd = random.Random(sd)
+        hold = set(rnd.sample(range(len(ev_j)), int(len(ev_j) * frac)))
+        ident, _ = identify(tracks, [e for i, e in enumerate(ev_j) if i not in hold], knots, nF)
+        for i in hold:
+            t_, j, X, Y = ev_j[i]
+            f = int(round((t_ - offset_at(knots, t_)) * FPS)); best = None
+            for k, t in enumerate(us):
+                if f + 6 < span[k][0] or f - 20 > span[k][1]: continue
+                ks = [q for q in range(f - 20, f + 6) if q in t.pts]
+                if not ks: continue
+                d = min(np.linalg.norm(t.pts[q] - [X, Y]) for q in ks)
+                if d < 1.0 and (best is None or d < best[0]): best = (d, t)
+            if best is None: continue
+            g = ident.get(best[1].id)
+            if g is None: unk += 1
+            elif g == j: ok += 1
+            else: bad += 1
+    return {"acierto": round(ok / max(1, ok + bad), 2), "pruebas": ok + bad + unk}
+
+
 # ---------------------------------------------------------------- métricas por recorrido
 def seg_metrics(t, knots, game):
     ks = np.array(sorted(t.pts)); P = np.array([t.pts[k] for k in ks])
@@ -268,8 +321,8 @@ def seg_metrics(t, knots, game):
     step = np.linalg.norm(np.diff(Pi, axis=0), axis=1)
     sp = np.clip(step * FPS, 0, VMAX_CAP)
     t_pano = full[1:] / FPS
-    t_vid = np.array([tp + offset_at(knots, tp) for tp in t_pano])
-    per = np.array([period_idx(game, tv) for tv in t_vid]) if len(t_vid) else np.array([])
+    t_vid = t_pano + np.interp(t_pano, [k[0] for k in knots], [k[1] for k in knots])
+    per = np.searchsorted(np.array(game.get("qEnd", []), float), t_vid, side="left")
     nper = max(4, len(game.get("qEnd", [])) + 1)
     byP = [round(float((sp[per == i] / FPS).sum()), 1) for i in range(nper)]
     vmax, spr = 0.0, 0
@@ -299,17 +352,34 @@ def main():
     ap.add_argument("--inicio-aprox", type=float, default=None, help="segundo aproximado del video del partido en que arranca la panorámica")
     a = ap.parse_args()
     game = json.load(open(a.partido))
-    R, XY, nF = load(a.dets, a.feats, a.calib)
-    team = classify(R)
-    print("detecciones por cuadro:", {k: round(float((team == k).sum()) / nF, 1) for k in ("us", "opp", "ref")})
-    tracks, by_f = track(R, XY, team, nF)
-    print("recorridos:", {k: sum(t.team == k for t in tracks) for k in ("us", "opp", "ref")})
+    t0 = time.time()
+    cache = os.path.join(os.path.dirname(os.path.abspath(a.dets)), "seguimiento.pkl")
     evs = aro_events(game)
     vlen = a.video_len or (max(e["t"] for e in game["events"]) + 60)
-    T0, knots, q = sync(evs, XY, team, by_f, nF, vlen, a.inicio_aprox)
-    print("sincronización: la panorámica arranca en el segundo", round(T0, 1), "del video del partido ·", q, "· tramos:", len(knots))
+    if os.path.exists(cache) and os.path.getmtime(cache) > max(os.path.getmtime(a.dets), os.path.getmtime(a.feats), os.path.getmtime(a.calib)) \
+            and a.inicio_aprox is None:
+        C = pickle.load(open(cache, "rb"))
+        boxes, tracks, nF, T0, knots, q = C["boxes"], C["tracks"], C["nF"], C["T0"], C["knots"], C["q"]
+        print("uso el seguimiento ya calculado (seguimiento.pkl); para rehacerlo, borralo")
+    else:
+        R, XY, nF = load(a.dets, a.feats, a.calib)
+        print(f"detecciones cargadas ({time.time() - t0:.0f} s)")
+        team = classify(R)
+        print("detecciones por cuadro:", {k: round(float((team == k).sum()) / nF, 1) for k in ("us", "opp", "ref")})
+        tracks, by_f = track(R, XY, team, nF)
+        print("recorridos:", {k: sum(t.team == k for t in tracks) for k in ("us", "opp", "ref")}, f"({time.time() - t0:.0f} s)")
+        T0, knots, q = sync(evs, XY, team, by_f, nF, vlen, a.inicio_aprox)
+        boxes = R[:, 4:8].astype(np.float32)
+        pickle.dump({"boxes": boxes, "tracks": tracks, "nF": nF, "T0": T0, "knots": knots, "q": q}, open(cache, "wb"))
+    print("sincronización: la panorámica arranca en el segundo", round(T0, 1), "del video del partido ·", q, "· tramos:", len(knots), f"({time.time() - t0:.0f} s)")
     ident, conf = identify(tracks, evs, knots, nF)
     print("recorridos de", game["us"]["name"], "identificados:", len(ident), "de", sum(t.team == "us" for t in tracks))
+    usT = [t for t in tracks if t.team == "us"]
+    cov = sum(len(t.pts) for t in usT if t.id in ident) / max(1, sum(len(t.pts) for t in usT))
+    iq = ident_quality(tracks, evs, knots, nF); iq["cobertura"] = round(cov, 2)
+    print(f"identidad: {iq['cobertura']*100:.0f}% del tiempo con número asignado; prueba interna: acierta {iq['acierto']*100:.0f}% ({iq['pruebas']} jugadas de control)")
+    if iq["acierto"] < 0.8:
+        print("ATENCIÓN: la identificación por jugador es poco confiable en este partido; los totales del equipo sí son válidos.")
     segs = []
     for t in tracks:
         if t.team == "ref": continue
@@ -324,12 +394,12 @@ def main():
         j = ident.get(t.id)
         lbl = (f"#{j} {names.get(j, '')}".strip() if j else ("?" if t.team == "us" else ""))
         for f, di in t.det.items():
-            x1, y1, x2, y2 = R[di, 4:8]
+            x1, y1, x2, y2 = boxes[di]
             frames[f].append([int(x1), int(y1), int(x2), int(y2), TEAMC[t.team], lbl, round(float(t.pts[f][0]), 2), round(float(t.pts[f][1]), 2)])
     json.dump({"fps": FPS, "colores": [game["us"]["color"], game["opp"]["color"]], "frames": frames},
-              open(os.path.join(os.path.dirname(os.path.abspath(a.out)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
+              open(os.path.join(os.path.dirname(os.path.abspath(a.dets)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
     out = {"version": 1, "fuente": "panoramica", "T0": round(T0, 2), "sync": [[round(k[0], 1), round(k[1], 2)] for k in knots],
-           "calidad": q, "umbral_alta": HI_SPEED, "umbral_sprint": SPRINT, "segs": segs,
+           "calidad": q, "identidad": iq, "umbral_alta": HI_SPEED, "umbral_sprint": SPRINT, "segs": segs,
            "cubre": [round(T0, 1), round(T0 + nF / FPS, 1)]}
     json.dump(out, open(a.out, "w"), separators=(",", ":"))
     # resumen

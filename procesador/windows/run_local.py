@@ -14,6 +14,19 @@ VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi")
 OUT_NAMES = {"fisico.json", "etiquetas.json"}
 
 
+def ensure_deps():
+    """Instala librerías nuevas que haya sumado una actualización del programa."""
+    need = []
+    for mod, pkg in (("orjson", "orjson"),):
+        try: __import__(mod)
+        except ImportError: need.append(pkg)
+    if not need: return
+    uv = os.path.join(os.path.expanduser("~"), "Aro", "herramientas", "uv", "uv.exe")
+    if os.path.exists(uv):
+        print("Instalando complementos nuevos:", ", ".join(need))
+        subprocess.run([uv, "pip", "install", "--python", PY, *need])
+
+
 def keep_awake(on):
     """Evita que Windows suspenda la PC mientras procesa."""
     try:
@@ -61,14 +74,49 @@ def run(cmd, log):
         return p.wait()
 
 
+def make_videos(games):
+    """Genera la panorámica con nombres para cada partido ya procesado que todavía no la tenga."""
+    for g in games:
+        name = os.path.basename(g); work = os.path.join(g, "trabajo")
+        out = os.path.join(g, "panoramica_con_nombres.mp4")
+        video, resp, err = pick_inputs(g)
+        print(f"\n=== {name} ===")
+        if err or not os.path.exists(os.path.join(work, "etiquetas.json")):
+            print("  Salteo: primero procesá el partido con procesar.bat."); continue
+        if os.path.exists(out) and os.path.getmtime(out) > os.path.getmtime(os.path.join(work, "etiquetas.json")):
+            print("  Ya está hecho:", out); continue
+        log = os.path.join(g, "proceso.log"); t0 = time.time()
+        print("  Armando el video con los nombres (usa la placa de video para comprimir)...")
+        ok = run([PY, "render.py", "--video", video, "--salida", work, "--archivo", out, "--codec", "h264_nvenc"], log) == 0
+        if not ok:
+            print("  La placa no pudo comprimir el video; pruebo con el procesador (más lento)...")
+            ok = run([PY, "render.py", "--video", video, "--salida", work, "--archivo", out], log) == 0
+        if ok:
+            print(f"  LISTO en {(time.time() - t0) / 60:.0f} min: {out}")
+            print("  Subilo a YouTube (oculto) y pegá el link en Aro: Etiquetar > Ajustes > Link de YouTube de la panorámica con nombres.")
+        else:
+            print("  ERROR al generar el video: mirá proceso.log en la carpeta del partido.")
+
+
 def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.expanduser("~"), "Aro", "partidos")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    root = args[0] if args else os.path.join(os.path.expanduser("~"), "Aro", "partidos")
+    ensure_deps()
+    # deja al día los accesos directos (.bat) de la carpeta Aro
+    import shutil
+    for b in ("procesar.bat", "generar_video.bat"):
+        try: shutil.copyfile(os.path.join(HERE, b), os.path.join(os.path.dirname(os.path.abspath(root)), b))
+        except Exception: pass
     games = [os.path.join(root, d) for d in sorted(os.listdir(root)) if os.path.isdir(os.path.join(root, d))]
     if not games:
         print(f"No hay carpetas de partidos en {root}. Creá una y poné adentro la panorámica y el respaldo .json.")
         return
-    lote = gpu_batch()
     keep_awake(True)
+    if "--video" in sys.argv:
+        try: make_videos(games)
+        finally: keep_awake(False)
+        return
+    lote = gpu_batch()
     try:
         for g in games:
             name = os.path.basename(g)
@@ -77,15 +125,20 @@ def main():
             print(f"\n=== {name} ===")
             if err:
                 print("  Salteo:", err); continue
-            if os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp)):
+            ver = os.path.getmtime(os.path.join(PROC, "procesar.py"))
+            if os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp), ver):
                 print("  Ya procesado (fisico.json está al día). Para rehacerlo, borrá fisico.json."); continue
             work = os.path.join(g, "trabajo"); os.makedirs(work, exist_ok=True)
             log = os.path.join(g, "proceso.log")
             t0 = time.time()
             print("  Video:", os.path.basename(video), "| Respaldo:", os.path.basename(resp))
-            print("  Paso 1/2: detectar jugadores (la parte larga). Si se corta, volvé a abrir procesar.bat y sigue desde donde quedó.")
-            if run([PY, "pipeline.py", "--video", video, "--out", work, "--modelo", "yolo11s.pt", "--lote", str(lote)], log):
-                print("  ERROR en la detección: mirá proceso.log en la carpeta del partido."); continue
+            done = os.path.join(work, "deteccion_completa.txt")
+            if os.path.exists(done) and os.path.getmtime(done) > os.path.getmtime(video):
+                print("  Paso 1/2: la detección de jugadores ya está hecha, la reutilizo.")
+            else:
+                print("  Paso 1/2: detectar jugadores (la parte larga). Si se corta, volvé a abrir procesar.bat y sigue desde donde quedó.")
+                if run([PY, "pipeline.py", "--video", video, "--out", work, "--modelo", "yolo11s.pt", "--lote", str(lote)], log):
+                    print("  ERROR en la detección: mirá proceso.log en la carpeta del partido."); continue
             print("  Paso 2/2: seguimiento, identidad y métricas.")
             if run([PY, "procesar.py", "--partido", resp, "--dets", os.path.join(work, "dets.json"), "--feats", os.path.join(work, "feats.json"),
                     "--calib", os.path.join(work, "calib.json"), "--out", out], log):

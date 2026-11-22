@@ -109,13 +109,18 @@ class Mapper:
         self.tree = cKDTree(self.img)
 
     def to_court(self, uv):
+        """Inversa exacta del modelo cilíndrico: rayo desde la cámara hasta el piso (z = 0)."""
         uv = np.atleast_2d(np.asarray(uv, float))
-        _, idx = self.tree.query(uv)
-        out = []
-        for q, i in zip(uv, idx):
-            s = least_squares(lambda xy: forward(self.p, xy[None])[0] - q, self.grid[i], method="lm")
-            out.append(s.x)
-        return np.array(out)
+        Cx, Cy, Cz, yaw, pitch, roll, f, f2, u0, v0 = self.p[:10]
+        th = (uv[:, 0] - u0) / f; t = (uv[:, 1] - v0) / f2
+        d = np.c_[np.sin(th), t, np.cos(th)]
+        base = d @ rot(yaw, pitch, roll)
+        P = np.c_[base[:, 0], -base[:, 2], -base[:, 1]]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = -Cz / P[:, 2]
+        out = np.c_[Cx + s * P[:, 0], Cy + s * P[:, 1]]
+        out[~np.isfinite(out).all(1) | (s <= 0)] = np.nan
+        return out
 
     def to_image(self, XY):
         return forward(self.p, np.atleast_2d(np.asarray(XY, float)))
