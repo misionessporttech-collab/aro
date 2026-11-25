@@ -183,10 +183,14 @@ def main():
             print(f"\n=== {name} ===")
             if err:
                 print("  Salteo:", err); continue
-            ver = os.path.getmtime(os.path.join(PROC, "procesar.py"))
-            if os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp), ver):
-                print("  Ya procesado (fisico.json está al día). Para rehacerlo, borrá fisico.json."); continue
             original = video_size(video) == (2048, 2048)
+            ver = os.path.getmtime(os.path.join(PROC, "procesar.py"))
+            try: fuente = json.load(open(out, encoding="utf-8")).get("fuente", "") if os.path.exists(out) else ""
+            except Exception: fuente = ""
+            if original and fuente != "original":
+                print("  Hay un archivo original de Veo nuevo: rehago el análisis con él.")
+            elif os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp), ver):
+                print("  Ya procesado (fisico.json está al día). Para rehacerlo, borrá fisico.json."); continue
             work = os.path.join(g, "trabajo_original" if original else "trabajo"); os.makedirs(work, exist_ok=True)
             log = os.path.join(g, "proceso.log")
             t0 = time.time()
