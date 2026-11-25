@@ -154,3 +154,35 @@ def refineC(p7, wmask, pmask, w_keys=2.0, extra=None):
     medw = float(np.median(rw[iw])) if iw.sum() > 20 else 99.0
     medp = float(np.median(rp[ip])) if ip.sum() > 20 else 99.0
     return sol.x, medw, medp, int(iw.sum()), int(ip.sum())
+
+def refineCP(p7, wmask, pmask, XYp, feet, w_keys=2.0, w_pl=1.0, gate=160):
+    """Ajuste cilíndrico con piso + zonas pintadas + jugadores (panorámica vs seguimiento)."""
+    def dmap(m):
+        e = cv2.Canny(m, 50, 150); e[:6] = 0; e[-6:] = 0; e[:, :6] = 0; e[:, -6:] = 0
+        return cv2.distanceTransform(255 - e, cv2.DIST_L2, 5)
+    dw, dp = dmap(wmask), dmap(pmask)
+    def samp(dist, pts, p):
+        uv = projC(p, pts)
+        inside = (uv[:, 0] > 8) & (uv[:, 0] < W - 8) & (uv[:, 1] > 8) & (uv[:, 1] < H - 8)
+        x = np.clip(np.nan_to_num(uv[:, 0]), 0, W - 1).astype(np.float32); y = np.clip(np.nan_to_num(uv[:, 1]), 0, H - 1).astype(np.float32)
+        d = cv2.remap(dist, x.reshape(-1, 1), y.reshape(-1, 1), cv2.INTER_LINEAR).ravel()
+        return np.where(inside, d, 0.0), inside
+    p = np.array(p7, float); pairs = (np.zeros((0, 2)), np.zeros((0, 2)))
+    for it in range(3):
+        if len(XYp) and len(feet):
+            uv = projC(p, XYp)
+            D = np.linalg.norm(uv[:, None] - feet[None], axis=2)
+            r, c = linear_sum_assignment(np.minimum(D, 1e5)); keep = D[r, c] < gate
+            pairs = (XYp[r[keep]], feet[c[keep]])
+        A, B = pairs
+        def res(q):
+            out = [samp(dw, RECT, q)[0], w_keys * samp(dp, KEYS, q)[0]]
+            if len(A): out.append(w_pl * (projC(q, A) - B).ravel() / 3.0)
+            return np.concatenate(out)
+        p = least_squares(res, p, loss='soft_l1', f_scale=6, x_scale='jac', max_nfev=300).x
+        gate = max(35, gate * 0.55)
+    rw, iw = samp(dw, RECT, p)
+    medw = float(np.median(rw[iw])) if iw.sum() > 20 else 99.0
+    A, B = pairs
+    pe = float(np.median(np.linalg.norm(projC(p, A) - B, axis=1))) if len(A) else 99.0
+    return p, medw, len(A), pe
