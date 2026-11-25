@@ -68,7 +68,8 @@ def pick_inputs(folder):
 def run(cmd, log):
     print("  >", " ".join(os.path.basename(c) if os.sep in c else c for c in cmd[:3]), "...")
     with open(log, "a", encoding="utf-8") as lf:
-        p = subprocess.Popen(cmd, cwd=PROC, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        p = subprocess.Popen(cmd, cwd=PROC, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         for line in p.stdout:
             print("   ", line.rstrip()); lf.write(line)
         return p.wait()
@@ -151,4 +152,7 @@ def main():
 
 
 if __name__ == "__main__":
+    try: sys.stdout.reconfigure(encoding="utf-8")
+    except Exception: pass
+    os.system("chcp 65001 >nul") if os.name == "nt" else None
     main()
