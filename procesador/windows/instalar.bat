@@ -49,7 +49,7 @@ if not exist "%ARO%\entorno\Scripts\python.exe" "%UV%" venv "%ARO%\entorno" --py
 if errorlevel 1 goto fallo
 "%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" torch torchvision --index-url https://download.pytorch.org/whl/cu124
 if errorlevel 1 goto fallo
-"%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" ultralytics opencv-python scipy scikit-learn numpy orjson
+"%UV%" pip install --python "%ARO%\entorno\Scripts\python.exe" ultralytics opencv-python scipy scikit-learn numpy orjson timm pytorch-lightning nltk pyyaml
 if errorlevel 1 goto fallo
 
 echo [6/6] Probando la placa de video desde Python...

@@ -1,23 +1,66 @@
 """Procesa en la PC (con la placa de video) cada carpeta de partido dentro de Aro\\partidos.
 
 Cada carpeta necesita:
-  - la grabación panorámica (.mp4 / .mkv / .mov; si hay varias, la que tenga "panor" en el nombre o la más grande)
+  - el archivo panorámico original de Veo (2048x2048, dos lentes) o, si no está, una grabación de pantalla de la panorámica
   - el respaldo del partido exportado desde Aro (.json)
 Deja en la misma carpeta: fisico.json (para importar en Aro) y la subcarpeta "trabajo" con lo intermedio.
 """
-import ctypes, glob, json, os, subprocess, sys, time
+import ctypes, glob, json, os, shutil, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROC = os.path.dirname(HERE)
 PY = sys.executable
 VIDEO_EXT = (".mp4", ".mkv", ".mov", ".avi")
-OUT_NAMES = {"fisico.json", "etiquetas.json"}
+OUT_NAMES = {"fisico.json", "etiquetas.json", "calib_lentes.json"}
+ARO = os.path.join(os.path.expanduser("~"), "Aro")
+PARSEQ_COMMIT = "1902db0"
+PARSEQ_DIR = os.path.join(ARO, "herramientas", "parseq")
+LECTOR = os.path.join(ARO, "modelos", "lector_camisetas_v1.pt")
+
+
+def video_size(path):
+    try:
+        out = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                                       "-of", "csv=p=0", path], text=True).strip()
+        w, h = out.split(",")[:2]; return int(w), int(h)
+    except Exception:
+        return 0, 0
+
+
+def ensure_parseq():
+    """Código del lector de números (PARSeq, licencia Apache 2.0)."""
+    if os.path.exists(os.path.join(PARSEQ_DIR, "strhub")): return True
+    try:
+        print("Descargando el lector de números (una sola vez)...")
+        tmpd = os.environ.get("TEMP", ARO)
+        z = os.path.join(tmpd, "parseq.zip")
+        urllib.request.urlretrieve(f"https://github.com/baudm/parseq/archive/{PARSEQ_COMMIT}.zip", z)
+        tmp = os.path.join(tmpd, "parseq_x")
+        shutil.rmtree(tmp, ignore_errors=True); zipfile.ZipFile(z).extractall(tmp)
+        src = os.path.join(tmp, os.listdir(tmp)[0]); shutil.rmtree(PARSEQ_DIR, ignore_errors=True); shutil.move(src, PARSEQ_DIR)
+        return True
+    except Exception as e:
+        print("  No pude descargar el lector de números:", e); return False
+
+
+def adopt_original(folder):
+    """Si el archivo original de Veo quedó en Descargas, lo mueve a la carpeta del partido."""
+    if any(f.lower().endswith(VIDEO_EXT) and "original" in f.lower() for f in os.listdir(folder)): return
+    dl = os.path.join(os.path.expanduser("~"), "Downloads")
+    name = os.path.basename(folder).lower().split("-")[0]
+    for f in glob.glob(os.path.join(dl, "*panoramica_original*.mp4")):
+        b = os.path.basename(f).lower()
+        if name in b and "muestra" not in b:
+            print(f"  Muevo {os.path.basename(f)} de Descargas a la carpeta del partido.")
+            try: os.replace(f, os.path.join(folder, os.path.basename(f)))
+            except Exception as e: print("   no pude moverlo:", e)
+            return
 
 
 def ensure_deps():
     """Instala librerías nuevas que haya sumado una actualización del programa."""
     need = []
-    for mod, pkg in (("orjson", "orjson"),):
+    for mod, pkg in (("orjson", "orjson"), ("timm", "timm"), ("pytorch_lightning", "pytorch-lightning"), ("nltk", "nltk"), ("yaml", "pyyaml")):
         try: __import__(mod)
         except ImportError: need.append(pkg)
     if not need: return
@@ -53,11 +96,12 @@ def gpu_batch():
 
 
 def pick_inputs(folder):
-    vids = [f for f in os.listdir(folder) if f.lower().endswith(VIDEO_EXT)]
+    vids = [f for f in os.listdir(folder) if f.lower().endswith(VIDEO_EXT) and "con_nombres" not in f.lower()]
     if not vids:
         return None, None, "falta la grabación panorámica"
+    orig = [v for v in vids if video_size(os.path.join(folder, v)) == (2048, 2048)]
     pan = [v for v in vids if "panor" in v.lower()]
-    video = (pan or sorted(vids, key=lambda v: -os.path.getsize(os.path.join(folder, v))))[0]
+    video = (orig or pan or sorted(vids, key=lambda v: -os.path.getsize(os.path.join(folder, v))))[0]
     js = [f for f in os.listdir(folder) if f.lower().endswith(".json") and f.lower() not in OUT_NAMES]
     if not js:
         return None, None, "falta el respaldo del partido (.json exportado desde Aro)"
@@ -122,6 +166,7 @@ def main():
         for g in games:
             name = os.path.basename(g)
             out = os.path.join(g, "fisico.json")
+            adopt_original(g)
             video, resp, err = pick_inputs(g)
             print(f"\n=== {name} ===")
             if err:
@@ -129,24 +174,39 @@ def main():
             ver = os.path.getmtime(os.path.join(PROC, "procesar.py"))
             if os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp), ver):
                 print("  Ya procesado (fisico.json está al día). Para rehacerlo, borrá fisico.json."); continue
-            work = os.path.join(g, "trabajo"); os.makedirs(work, exist_ok=True)
+            original = video_size(video) == (2048, 2048)
+            work = os.path.join(g, "trabajo_original" if original else "trabajo"); os.makedirs(work, exist_ok=True)
             log = os.path.join(g, "proceso.log")
             t0 = time.time()
-            print("  Video:", os.path.basename(video), "| Respaldo:", os.path.basename(resp))
+            print("  Video:", os.path.basename(video), "(original de Veo, dos lentes)" if original else "(grabación de la panorámica)", "| Respaldo:", os.path.basename(resp))
             done = os.path.join(work, "deteccion_completa.txt")
+            lentes, lector = "", []
+            if original:
+                lentes = os.path.join(g, "calib_lentes.json")
+                if not os.path.exists(lentes):
+                    lentes = os.path.join(PROC, "calib_lentes_mitre.json")
+                    print("  Uso la calibración de lentes de la cancha de Mitre (si es otra cancha, poné calib_lentes.json en la carpeta).")
+                lector = ["--lector", LECTOR, "--parseq-dir", PARSEQ_DIR] if os.path.exists(LECTOR) and ensure_parseq() else []
+                if not lector: print("  ATENCIÓN: falta el lector de números (Aro\\modelos\\lector_camisetas_v1.pt); sigo sin leer camisetas.")
             if os.path.exists(done) and os.path.getmtime(done) > os.path.getmtime(video):
                 print("  Paso 1/2: la detección de jugadores ya está hecha, la reutilizo.")
             else:
-                print("  Paso 1/2: detectar jugadores (la parte larga). Si se corta, volvé a abrir procesar.bat y sigue desde donde quedó.")
-                if run([PY, "pipeline.py", "--video", video, "--out", work, "--modelo", "yolo11s.pt", "--lote", str(lote)], log):
+                print("  Paso 1/2: detectar jugadores" + (" y leer números" if original else "") + " (la parte larga). Si se corta, volvé a abrir procesar.bat y sigue desde donde quedó.")
+                if original:
+                    cmd = [PY, "veo_raw.py", "--video", video, "--out", work, "--lentes", lentes, "--modelo", "yolo11s.pt", "--lote", str(lote)] + lector
+                else:
+                    cmd = [PY, "pipeline.py", "--video", video, "--out", work, "--modelo", "yolo11s.pt", "--lote", str(lote)]
+                if run(cmd, log):
                     print("  ERROR en la detección: mirá proceso.log en la carpeta del partido."); continue
             print("  Paso 2/2: seguimiento, identidad y métricas.")
-            if run([PY, "procesar.py", "--partido", resp, "--dets", os.path.join(work, "dets.json"), "--feats", os.path.join(work, "feats.json"),
-                    "--calib", os.path.join(work, "calib.json"), "--out", out], log):
+            cmd = [PY, "procesar.py", "--partido", resp, "--dets", os.path.join(work, "dets.json"), "--feats", os.path.join(work, "feats.json"),
+                   "--calib", os.path.join(work, "calib.json"), "--out", out]
+            if original: cmd += ["--lecturas", os.path.join(work, "lecturas.json"), "--inicio-aprox", "0"]
+            if run(cmd, log):
                 print("  ERROR en el análisis: mirá proceso.log en la carpeta del partido."); continue
             print(f"  LISTO en {(time.time() - t0) / 60:.0f} min: {out}")
             print("  Importalo en Aro: Análisis > Rendimiento físico > Importar análisis físico (.json).")
-            print("  Revisá también trabajo\\calib_vis.jpg: las líneas rojas tienen que caer sobre el borde de la cancha.")
+            if not original: print("  Revisá también trabajo\\calib_vis.jpg: las líneas rojas tienen que caer sobre el borde de la cancha.")
     finally:
         keep_awake(False)
 

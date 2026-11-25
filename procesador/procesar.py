@@ -56,6 +56,10 @@ def load(dets_path, feats_path, calib_path):
     dets = _read_json(dets_path)
     cnt = np.array([len(d["b"]) for d in dets], np.int64)
     B = np.array([b for d in dets for b in d["b"]], np.float32).reshape(-1, 5)
+    has_xy = bool(dets) and "xy" in dets[0]
+    XYd = np.array([p for d in dets for p in d["xy"]], np.float64).reshape(-1, 2) if has_xy else None
+    LEN = np.array([l for d in dets for l in d["l"]], np.int8) if has_xy else None
+    sub = np.concatenate([np.arange(c) for c in cnt]) if len(cnt) else np.zeros(0, int)
     nD = len(dets); del dets; gc.collect()
     fe = _read_json(feats_path)
     nF = min(nD, len(fe))
@@ -64,13 +68,17 @@ def load(dets_path, feats_path, calib_path):
     del fe; gc.collect()
     fidx = np.repeat(np.arange(nD), cnt)
     keep = (fidx < nF) & np.repeat(np.r_[ok_f, np.zeros(nD - nF, bool)], cnt)
-    fidx, B = fidx[keep], B[keep]
+    fidx, B, sub = fidx[keep], B[keep], sub[keep]
     x1, y1, x2, y2, cf = B.T
     R = np.c_[fidx, cf, (x1 + x2) / 2, y2, x1, y1, x2, y2, F].astype(np.float64)
-    M = Mapper(json.load(open(calib_path))["params"])
-    XY = M.to_court(R[:, 2:4])
+    if has_xy:
+        XY = XYd[keep]; lens = LEN[keep]
+    else:
+        M = Mapper(json.load(open(calib_path))["params"])
+        XY = M.to_court(R[:, 2:4]); lens = np.zeros(len(R), np.int8)
     ok = (XY[:, 0] > -1.0) & (XY[:, 0] < CW + 1.0) & (XY[:, 1] > -0.35) & (XY[:, 1] < CH + 0.8) & (R[:, 15] >= 15)
-    return R[ok], XY[ok], nF
+    orig = np.c_[fidx, sub][ok]
+    return R[ok], XY[ok], nF, orig, lens[ok]
 
 def classify(R):
     F = R[:, 8:15]  # gold, white, red, dark, blue, medB, medL
@@ -235,8 +243,25 @@ def offset_at(knots, t):
 
 
 # ---------------------------------------------------------------- identidad
-def identify(tracks, evs, knots, nF):
+def read_votes(tracks, reads, orig, roster, min_conf=0.8):
+    """Votos de número por recorrido a partir de las lecturas de camiseta (veo_raw.py)."""
+    if not reads or orig is None: return {}
+    row = {(int(f), int(i)): k for k, (f, i) in enumerate(orig)}
+    owner = {}
+    for t in tracks:
+        for f, di in t.det.items(): owner[int(di)] = t
+    V = {}
+    for f, i, num, c in reads:
+        if c < min_conf or (roster and num not in roster): continue
+        k = row.get((int(f), int(i)))
+        t = owner.get(k) if k is not None else None
+        if t is None or t.team != "us": continue
+        V.setdefault(t.id, {}); V[t.id][num] = V[t.id].get(num, 0.0) + c
+    return V
+
+def identify(tracks, evs, knots, nF, votes=None, use_events=True):
     us = [t for t in tracks if t.team == "us"]
+    votes = votes or {}
     ev = []
     for t, j, X, Y in evs:
         if not j: continue
@@ -244,8 +269,12 @@ def identify(tracks, evs, knots, nF):
         pt = t - offset_at(knots, t)
         f = int(round(pt * FPS))
         if 0 <= f < nF: ev.append((f, j, X, Y))
-    jerseys = sorted({e[1] for e in ev}, key=lambda s: (len(s), s))
+    if not use_events: ev = []
+    jerseys = sorted({e[1] for e in ev} | {j for v in votes.values() for j in v}, key=lambda s: (len(s), s))
     S = np.zeros((len(us), len(jerseys)))
+    for a, t in enumerate(us):
+        for j, w in votes.get(t.id, {}).items():
+            S[a, jerseys.index(j)] += 2.0 * w      # una lectura confiable pesa más que una jugada cercana
     for f, j, X, Y in ev:
         for a, t in enumerate(us):
             ks = [k for k in range(f - 20, f + 6) if k in t.pts]
@@ -270,7 +299,7 @@ def identify(tracks, evs, knots, nF):
     # 2) el resto: mejor puntaje entre los números libres del quinteto activo en ese tramo
     for a in sorted(range(len(us)), key=lambda a: -len(us[a].pts)):
         t = us[a]
-        if t.id in ident or len(t.pts) < 30: continue
+        if t.id in ident or len(t.pts) < 30 or not ev: continue
         lo, hi = min(t.pts), max(t.pts)
         active = {j for f, j, X, Y in ev if lo - 600 <= f <= hi + 600}
         opts = [(S[a, jerseys.index(j)], j) for j in active if free(j, lo, hi)]
@@ -281,6 +310,27 @@ def identify(tracks, evs, knots, nF):
             spans.setdefault(j, []).append((lo, hi))
     return ident, conf
 
+
+def agreement(tracks, evs, knots, ident):
+    """Cuántas jugadas etiquetadas (con número) caen sobre un recorrido con ese mismo número."""
+    us = [t for t in tracks if t.team == "us"]
+    span = [(min(t.pts), max(t.pts)) for t in us]
+    ok = bad = unk = 0
+    for t_, j, X, Y in evs:
+        if not j: continue
+        f = int(round((t_ - offset_at(knots, t_)) * FPS)); best = None
+        for k, t in enumerate(us):
+            if f + 6 < span[k][0] or f - 20 > span[k][1]: continue
+            ks = [q for q in range(f - 20, f + 6) if q in t.pts]
+            if not ks: continue
+            d = min(np.linalg.norm(t.pts[q] - [X, Y]) for q in ks)
+            if d < 1.0 and (best is None or d < best[0]): best = (d, t)
+        if best is None: continue
+        g = ident.get(best[1].id)
+        if g is None: unk += 1
+        elif g == j: ok += 1
+        else: bad += 1
+    return {"acierto": round(ok / max(1, ok + bad), 2), "bien": ok, "mal": bad, "sin_numero": unk}
 
 def ident_quality(tracks, evs, knots, nF, seeds=4, frac=0.3):
     """Prueba interna: esconde parte de las jugadas, identifica con el resto y mide cuántas
@@ -349,6 +399,7 @@ def main():
     ap.add_argument("--dets", default="dets.json"); ap.add_argument("--feats", default="feats.json")
     ap.add_argument("--calib", default="calib.json"); ap.add_argument("--out", default="fisico.json")
     ap.add_argument("--video-len", type=float, default=0)
+    ap.add_argument("--lecturas", default="", help="lecturas de camiseta (veo_raw.py)")
     ap.add_argument("--inicio-aprox", type=float, default=None, help="segundo aproximado del video del partido en que arranca la panorámica")
     a = ap.parse_args()
     game = json.load(open(a.partido))
@@ -356,13 +407,14 @@ def main():
     cache = os.path.join(os.path.dirname(os.path.abspath(a.dets)), "seguimiento.pkl")
     evs = aro_events(game)
     vlen = a.video_len or (max(e["t"] for e in game["events"]) + 60)
-    if os.path.exists(cache) and os.path.getmtime(cache) > max(os.path.getmtime(a.dets), os.path.getmtime(a.feats), os.path.getmtime(a.calib)) \
-            and a.inicio_aprox is None:
+    deps = [a.dets, a.feats] + ([a.calib] if os.path.exists(a.calib) else [])
+    if os.path.exists(cache) and os.path.getmtime(cache) > max(os.path.getmtime(x) for x in deps) and a.inicio_aprox is None:
         C = pickle.load(open(cache, "rb"))
         boxes, tracks, nF, T0, knots, q = C["boxes"], C["tracks"], C["nF"], C["T0"], C["knots"], C["q"]
+        orig, lens = C.get("orig"), C.get("lens")
         print("uso el seguimiento ya calculado (seguimiento.pkl); para rehacerlo, borralo")
     else:
-        R, XY, nF = load(a.dets, a.feats, a.calib)
+        R, XY, nF, orig, lens = load(a.dets, a.feats, a.calib)
         print(f"detecciones cargadas ({time.time() - t0:.0f} s)")
         team = classify(R)
         print("detecciones por cuadro:", {k: round(float((team == k).sum()) / nF, 1) for k in ("us", "opp", "ref")})
@@ -370,14 +422,28 @@ def main():
         print("recorridos:", {k: sum(t.team == k for t in tracks) for k in ("us", "opp", "ref")}, f"({time.time() - t0:.0f} s)")
         T0, knots, q = sync(evs, XY, team, by_f, nF, vlen, a.inicio_aprox)
         boxes = R[:, 4:8].astype(np.float32)
-        pickle.dump({"boxes": boxes, "tracks": tracks, "nF": nF, "T0": T0, "knots": knots, "q": q}, open(cache, "wb"))
+        pickle.dump({"boxes": boxes, "tracks": tracks, "nF": nF, "T0": T0, "knots": knots, "q": q, "orig": orig, "lens": lens}, open(cache, "wb"))
     print("sincronización: la panorámica arranca en el segundo", round(T0, 1), "del video del partido ·", q, "· tramos:", len(knots), f"({time.time() - t0:.0f} s)")
-    ident, conf = identify(tracks, evs, knots, nF)
-    print("recorridos de", game["us"]["name"], "identificados:", len(ident), "de", sum(t.team == "us" for t in tracks))
+    roster = {str(r.get("j")) for r in game.get("roster", []) if r.get("j") is not None}
+    reads = json.load(open(a.lecturas)) if a.lecturas and os.path.exists(a.lecturas) else []
+    votes = read_votes(tracks, reads, orig, roster)
     usT = [t for t in tracks if t.team == "us"]
-    cov = sum(len(t.pts) for t in usT if t.id in ident) / max(1, sum(len(t.pts) for t in usT))
-    iq = ident_quality(tracks, evs, knots, nF); iq["cobertura"] = round(cov, 2)
-    print(f"identidad: {iq['cobertura']*100:.0f}% del tiempo con número asignado; prueba interna: acierta {iq['acierto']*100:.0f}% ({iq['pruebas']} jugadas de control)")
+    tot_us = max(1, sum(len(t.pts) for t in usT))
+    if votes:
+        # control independiente: identidad solo con camisetas, comparada con las jugadas etiquetadas
+        id_cam, _ = identify(tracks, evs, knots, nF, votes, use_events=False)
+        ag = agreement(tracks, evs, knots, id_cam)
+        cov_cam = sum(len(t.pts) for t in usT if t.id in id_cam) / tot_us
+        print(f"camisetas: {len(reads)} lecturas; solo con camisetas se identifica el {cov_cam*100:.0f}% del tiempo y coincide con "
+              f"{ag['acierto']*100:.0f}% de las jugadas etiquetadas ({ag['bien']} bien, {ag['mal']} mal, {ag['sin_numero']} sin número)")
+    ident, conf = identify(tracks, evs, knots, nF, votes)
+    print("recorridos de", game["us"]["name"], "identificados:", len(ident), "de", len(usT))
+    cov = sum(len(t.pts) for t in usT if t.id in ident) / tot_us
+    if votes:
+        iq = {"metodo": "camisetas", "acierto": ag["acierto"], "pruebas": ag["bien"] + ag["mal"], "cobertura": round(cov, 2), "cobertura_camisetas": round(cov_cam, 2)}
+    else:
+        iq = ident_quality(tracks, evs, knots, nF); iq["cobertura"] = round(cov, 2)
+    print(f"identidad: {iq['cobertura']*100:.0f}% del tiempo con número asignado; control: acierta {iq['acierto']*100:.0f}% ({iq['pruebas']} jugadas)")
     if iq["acierto"] < 0.8:
         print("ATENCIÓN: la identificación por jugador es poco confiable en este partido; los totales del equipo sí son válidos.")
     segs = []
@@ -398,7 +464,7 @@ def main():
             frames[f].append([int(x1), int(y1), int(x2), int(y2), TEAMC[t.team], lbl, round(float(t.pts[f][0]), 2), round(float(t.pts[f][1]), 2)])
     json.dump({"fps": FPS, "colores": [game["us"]["color"], game["opp"]["color"]], "frames": frames},
               open(os.path.join(os.path.dirname(os.path.abspath(a.dets)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
-    out = {"version": 1, "fuente": "panoramica", "T0": round(T0, 2), "sync": [[round(k[0], 1), round(k[1], 2)] for k in knots],
+    out = {"version": 1, "fuente": "original" if votes else "panoramica", "T0": round(T0, 2), "sync": [[round(k[0], 1), round(k[1], 2)] for k in knots],
            "calidad": q, "identidad": iq, "umbral_alta": HI_SPEED, "umbral_sprint": SPRINT, "segs": segs,
            "cubre": [round(T0, 1), round(T0 + nF / FPS, 1)]}
     json.dump(out, open(a.out, "w"), separators=(",", ":"))
