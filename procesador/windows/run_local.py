@@ -27,6 +27,18 @@ def video_size(path):
         return 0, 0
 
 
+def ensure_lector():
+    """El modelo del lector puede llegar a Descargas o a la carpeta de partidos: lo ubica en Aro\\modelos."""
+    if os.path.exists(LECTOR): return True
+    for d in (os.path.join(os.path.expanduser("~"), "Downloads"), os.path.join(ARO, "partidos")):
+        f = os.path.join(d, os.path.basename(LECTOR))
+        if os.path.exists(f):
+            os.makedirs(os.path.dirname(LECTOR), exist_ok=True)
+            try: shutil.move(f, LECTOR); print("  Lector de números instalado en Aro\\modelos."); return True
+            except Exception as e: print("  No pude mover el lector de números:", e)
+    return False
+
+
 def ensure_parseq():
     """Código del lector de números (PARSeq, licencia Apache 2.0)."""
     if os.path.exists(os.path.join(PARSEQ_DIR, "strhub")): return True
@@ -186,7 +198,7 @@ def main():
                 if not os.path.exists(lentes):
                     lentes = os.path.join(PROC, "calib_lentes_mitre.json")
                     print("  Uso la calibración de lentes de la cancha de Mitre (si es otra cancha, poné calib_lentes.json en la carpeta).")
-                lector = ["--lector", LECTOR, "--parseq-dir", PARSEQ_DIR] if os.path.exists(LECTOR) and ensure_parseq() else []
+                lector = ["--lector", LECTOR, "--parseq-dir", PARSEQ_DIR] if ensure_lector() and ensure_parseq() else []
                 if not lector: print("  ATENCIÓN: falta el lector de números (Aro\\modelos\\lector_camisetas_v1.pt); sigo sin leer camisetas.")
             if os.path.exists(done) and os.path.getmtime(done) > os.path.getmtime(video):
                 print("  Paso 1/2: la detección de jugadores ya está hecha, la reutilizo.")
