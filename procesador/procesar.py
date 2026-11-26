@@ -362,13 +362,50 @@ def ident_quality(tracks, evs, knots, nF, seeds=4, frac=0.3):
 
 
 # ---------------------------------------------------------------- métricas por recorrido
-def shots_from(path, knots, game):
-    """Tiros detectados en la panorámica original (tiros.py), en tiempo del video del partido y con equipo según el aro."""
+HOOP_XY = {"izquierdo": (1.575, CH / 2), "derecho": (CW - 1.575, CH / 2)}
+
+
+def _iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0])); iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    i = ix * iy; u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - i
+    return i / u if u > 0 else 0.0
+
+
+def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None, ident=None):
+    """Tiros detectados en la panorámica original (tiros.py), en tiempo del video del partido, con equipo según el aro
+    y, si se pudo seguir la pelota hasta las manos, el tirador (recorrido -> camiseta) y la distancia al aro."""
     j = json.load(open(path, encoding="utf-8")); out = []
+    owner, rows_f = {}, {}
+    if tracks is not None and orig is not None:
+        for t in tracks:
+            for f, di in t.det.items(): owner[int(di)] = t
+        for k, f in enumerate(orig[:, 0]): rows_f.setdefault(int(f), []).append(k)
+    ident = ident or {}
     for s in j["tiros"]:
         tv = s["t"] + offset_at(knots, s["t"])
         team = "us" if (s["aro"] == "derecho") == attack_right(game, tv) else "opp"
-        out.append({"t": round(tv, 1), "aro": s["aro"], "team": team, "made": bool(s["convertido"]), "rebote": bool(s.get("rebote"))})
+        o = {"t": round(tv, 1), "aro": s["aro"], "team": team, "made": bool(s["convertido"]), "rebote": bool(s.get("rebote"))}
+        tb = s.get("tirador_box")
+        if tb and owner:
+            f0 = int(round(s.get("tirador_t", s["suelta_t"]) * FPS)); L = 0 if s.get("lente") == "arriba" else 1; best = None
+            for df in (0, -1, 1, -2, 2):
+                for k in rows_f.get(f0 + df, []):
+                    if lens is not None and int(lens[k]) != L: continue
+                    v = _iou(tb, boxes[k]) - 0.05 * abs(df)
+                    if v > 0.3 and (best is None or v > best[0]): best = (v, owner.get(k), f0 + df)
+            if best and best[1] is not None:
+                t = best[1]
+                fs = sorted(t.pts, key=lambda f: abs(f - best[2]))[0]; X, Y = t.pts[fs]
+                hx, hy = HOOP_XY[s["aro"]]; d = float(np.hypot(X - hx, Y - hy))
+                o.update({"j": ident.get(t.id) if t.team == "us" else None, "equipo_tirador": t.team,
+                          "x": round(float(X), 2), "y": round(float(Y), 2), "dist": round(d, 2)})
+        if "dist" not in o and s.get("tirador_xy"):
+            X, Y = s["tirador_xy"]; hx, hy = HOOP_XY[s["aro"]]
+            o.update({"x": X, "y": Y, "dist": round(float(np.hypot(X - hx, Y - hy)), 2)})
+        if "dist" in o:
+            libre = abs(o["dist"] - 4.225) < 0.8 and abs(o["y"] - CH / 2) < 1.0
+            o["tipo"] = "libre" if libre else ("triple" if o["dist"] > 6.6 else "doble")
+        out.append(o)
     return out
 
 
@@ -382,6 +419,10 @@ def shots_check(shots, game, win=(-1.5, 4.0)):
         if c:
             i = min(c, key=lambda i: abs(e["t"] - shots[i]["t"] - 1)); used.add(i); r["encontrados"] += 1
             r["resultado_ok"] += shots[i]["made"] == bool(e.get("d", {}).get("made"))
+            if shots[i].get("j"): r["tirador_con_numero"] = r.get("tirador_con_numero", 0) + 1; r["tirador_ok"] = r.get("tirador_ok", 0) + (shots[i]["j"] == str(e.get("j")))
+            if shots[i].get("tipo"):
+                real = "libre" if e["type"] == "ft" else ("triple" if e.get("d", {}).get("pts") == 3 else "doble")
+                r["tipo_con_dato"] = r.get("tipo_con_dato", 0) + 1; r["tipo_ok"] = r.get("tipo_ok", 0) + (shots[i]["tipo"] == real)
     for e in opp:
         c = [i for i, s in enumerate(shots) if i not in used and s["team"] == "opp" and s["made"] and -3 <= e["t"] - s["t"] <= 8]
         if c: used.add(min(c, key=lambda i: abs(e["t"] - shots[i]["t"]))); r["rival_encontrados"] += 1
@@ -492,12 +533,13 @@ def main():
             frames[f].append([int(x1), int(y1), int(x2), int(y2), TEAMC[t.team], lbl, round(float(t.pts[f][0]), 2), round(float(t.pts[f][1]), 2)])
     json.dump({"fps": FPS, "colores": [game["us"]["color"], game["opp"]["color"]], "frames": frames},
               open(os.path.join(os.path.dirname(os.path.abspath(a.dets)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
-    shots = shots_from(a.tiros, knots, game) if a.tiros and os.path.exists(a.tiros) else []
+    shots = shots_from(a.tiros, knots, game, tracks, boxes, orig, lens, ident) if a.tiros and os.path.exists(a.tiros) else []
     if shots:
         sc = shots_check(shots, game)
         print(f"tiros: {len(shots)} detectados ({sum(s['made'] for s in shots)} convertidos). Contra lo etiquetado: "
               f"{sc['encontrados']} de {sc['propios']} tiros propios encontrados, resultado correcto en {sc['resultado_ok']}; "
-              f"{sc['rival_encontrados']} de {sc['rival_puntos']} anotaciones del rival; {sc['propios_sin_etiqueta']} tiros propios sin etiqueta")
+              f"{sc['rival_encontrados']} de {sc['rival_puntos']} anotaciones del rival; {sc['propios_sin_etiqueta']} tiros propios sin etiqueta; "
+              f"tirador con número en {sc.get('tirador_con_numero', 0)} (bien {sc.get('tirador_ok', 0)}); tipo de tiro bien en {sc.get('tipo_ok', 0)} de {sc.get('tipo_con_dato', 0)}")
     out = {"version": 1, "fuente": "original" if votes else "panoramica", "T0": round(T0, 2), "sync": [[round(k[0], 1), round(k[1], 2)] for k in knots],
            "calidad": q, "identidad": iq, "umbral_alta": HI_SPEED, "umbral_sprint": SPRINT, "segs": segs,
            "cubre": [round(T0, 1), round(T0 + nF / FPS, 1)]}

@@ -3,7 +3,9 @@
 Mira solo un recorte alrededor de cada aro, a 30 cuadros por segundo:
   1. separa lo que se mueve del fondo (la pelota, la red),
   2. sigue la pelota cuando llega a la altura del aro,
-  3. decide si entró: no rebota hacia arriba y la red se sacude como en un tiro convertido.
+  3. decide si entró: no rebota hacia arriba y la red se sacude como en un tiro convertido,
+  4. sigue la pelota hacia atrás en la imagen completa hasta las manos del tirador y lo ubica en la cancha
+     (de ahí salen la posición del tiro, si fue de 2, de 3 o libre, y quién tiró).
 
 La posición de cada aro en la imagen viene de la calibración de lentes de la cancha ("aros").
 
@@ -101,9 +103,110 @@ def detectar(F, fps, nombres):
             red = max(F[g][k][1] for g in range(f, min(len(F), f + 30)))
             ev.append({"t": round(f / fps, 2), "aro": nombre, "convertido": (not rebote) and red >= 300,
                        "rebote": rebote, "red": red, "desde": [round(xs[-1]), round(ys[-1])], "llegada": [round(c[0]), round(c[1])],
-                       "vuelo": round((back[0][0] - back[-1][0]) / fps, 2)})
+                       "vuelo": round((back[0][0] - back[-1][0]) / fps, 2), "_k": k,
+                       "_atras": [[g, round(p[0], 1), round(p[1], 1)] for g, p in back]})
             last = f
     return sorted(ev, key=lambda e: e["t"])
+
+
+# ------------------------------------------------------------ tirador: la pelota hacia atrás hasta sus manos
+LW, LH = 2048, 1024
+HOOPS = {"izquierdo": (1.575, 7.5), "derecho": (28 - 1.575, 7.5)}
+
+
+def roi_a_lente(aro, x, y):
+    lado = 10 * aro["ancho"]; s = lado / S
+    return aro["x"] - lado / 2 + x * s, aro["y"] - lado * 2 / 3 + y * s
+
+
+def cuadros_lente(video, lente, t0, dur):
+    y0 = 0 if lente == "arriba" else LH
+    cmd = ["ffmpeg", "-loglevel", "error", "-ss", f"{max(0, t0):.3f}", "-i", video, "-t", f"{dur:.3f}",
+           "-vf", f"crop={LW}:{LH}:0:{y0},format=gray", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+    b = subprocess.run(cmd, stdout=subprocess.PIPE).stdout
+    n = len(b) // (LW * LH)
+    return np.frombuffer(b[:n * LW * LH], np.uint8).reshape(n, LH, LW)
+
+
+def hacia_atras(G, pts, maxback=75, R=40):
+    """pts: [(i, x, y)] posiciones conocidas (en la lente) de la pelota llegando al aro. Devuelve el camino completo."""
+    path = sorted((int(i), float(x), float(y)) for i, x, y in pts if 0 <= i < len(G))
+    if len(path) < 3: return path
+    K = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    miss = 0; f = path[0][0]
+    while f > 3 and len(path) < maxback:
+        f -= 1
+        q = np.array(path[:8], float)
+        ax = np.polyfit(q[:, 0], q[:, 1], 1); ay = np.polyfit(q[:, 0], q[:, 2], 2 if len(q) >= 4 else 1)
+        px, py = np.polyval(ax, f), np.polyval(ay, f)
+        x0 = int(max(0, min(LW - 2 * R, px - R))); y0 = int(max(0, min(LH - 2 * R, py - R)))
+        win = lambda k: G[k][y0:y0 + 2 * R, x0:x0 + 2 * R].astype(np.int16)
+        a = win(f); d = np.minimum(np.abs(a - win(f - 3)), np.abs(a - win(min(len(G) - 1, f + 3))))
+        m = cv2.morphologyEx(((d > 18) * 255).astype(np.uint8), cv2.MORPH_OPEN, K)
+        n, lab, st, cen = cv2.connectedComponentsWithStats(m)
+        best = None
+        for i in range(1, n):
+            if st[i][4] < 12: continue
+            cx, cy = cen[i][0] + x0, cen[i][1] + y0; dd = np.hypot(cx - px, cy - py)
+            if dd < R * 0.9 and (best is None or dd < best[0]): best = (dd, cx, cy, st[i][4])
+        if best is None or best[3] > 900:
+            miss += 1
+            if miss >= 4: break
+            continue
+        miss = 0; path.insert(0, (f, float(best[1]), float(best[2])))
+    return path
+
+
+def tiradores(video, aros, ev, fps, desde, lentes_path):
+    from ultralytics import YOLO
+    from lentes import Lentes
+    LEN = Lentes(lentes_path); yolo = YOLO("yolo11s.pt")
+    for e in ev:
+        aro = aros[e["_k"]]
+        t_arr = e["t"]; t0 = t_arr - 2.6
+        G = cuadros_lente(video, aro["lente"], desde + t0, 2.8)
+        if len(G) < 20: continue
+        f_arr0 = int(round(t_arr * fps)) - int(round(t0 * fps))   # índice local del cuadro de llegada
+        g_arr = e["_atras"][0][0]
+        pts = [(g - g_arr + f_arr0, *roi_a_lente(aro, x, y)) for g, x, y in e["_atras"]]
+        path = hacia_atras(G, pts)
+        if len(path) < 6: continue
+        # vuelo libre: desde la llegada hacia atrás, mientras los puntos sigan una parábola; antes de eso, la pelota en las manos
+        P = np.array(path, float); r = len(P) - 3
+        while r > 0:
+            q = P[r - 1:]
+            ax = np.polyfit(q[:, 0], q[:, 1], 1); ay = np.polyfit(q[:, 0], q[:, 2], 2)
+            res = np.hypot(np.polyval(ax, q[:, 0]) - q[:, 1], np.polyval(ay, q[:, 0]) - q[:, 2]).max()
+            if res > 7: break
+            r -= 1
+        manos = P[:r]
+        if len(manos) >= 3:   # punto más bajo con la pelota en las manos: a la altura de la cintura/pecho del tirador
+            k = int(np.argmax(manos[:, 2])); i0, sx, sy = int(manos[k, 0]), manos[k, 1], manos[k, 2]; rel = 0.5
+        else:                  # solo se vio el vuelo: el primer punto está cerca de las manos, arriba de la cabeza
+            i0, sx, sy = int(P[0, 0]), P[0, 1], P[0, 2]; rel = -0.05
+        frame = cv2.cvtColor(G[i0], cv2.COLOR_GRAY2BGR)
+        bx = yolo.predict(frame, imgsz=1408, classes=[0], conf=0.25, verbose=False)[0].boxes.xyxy.cpu().numpy()
+        best = None
+        for x1, y1, x2, y2 in bx:
+            w, h = x2 - x1, y2 - y1
+            if not (x1 - 0.5 * w <= sx <= x2 + 0.5 * w): continue
+            # la pelota en las manos puede estar a la altura de la cintura, arriba de la cabeza o picando junto a los pies
+            sc = min(abs(sy - (y1 + r_ * h)) / h + (0 if r_ == rel else 0.06) for r_ in (rel, -0.05, 0.5, 1.0)) + 0.5 * abs(sx - (x1 + x2) / 2) / w
+            if sc < 0.6 and (best is None or sc < best[0]): best = (sc, x1, y1, x2, y2)
+        e["suelta_t"] = round(t0 + int(P[r, 0] if r < len(P) else P[0, 0]) / fps + desde, 2)
+        e["tirador_t"] = round(t0 + i0 / fps + desde, 2)
+        e["suelta_px"] = [round(sx), round(sy)]
+        e["lente"] = aro["lente"]
+        if best:
+            _, x1, y1, x2, y2 = best
+            e["tirador_box"] = [round(float(v), 1) for v in (x1, y1, x2, y2)]
+            X, Y = LEN.a_cancha(aro["lente"], np.array([[(x1 + x2) / 2, y2]]))[0]
+            hx, hy = HOOPS[aro["nombre"]]
+            d = float(np.hypot(X - hx, Y - hy))
+            e["tirador_xy"] = [round(float(X), 2), round(float(Y), 2)]
+            e["distancia"] = round(d, 2)
+            ft = abs(d - 4.225) < 0.7 and abs(Y - 7.5) < 0.8
+            e["tipo"] = "libre" if ft else ("triple" if d > 6.6 else "doble")
 
 
 def main():
@@ -156,7 +259,15 @@ def main():
             print(f"tiros: {len(F)}/{total} cuadros · {len(F)/el:.0f} cuadros/s · faltan ~{(total-len(F))/(len(F)/el)/60:.0f} min", flush=True)
     p.kill()
     ev = detectar(F, fps, [x["nombre"] for x in aros])
-    for e in ev: e["t"] = round(e["t"] + a.desde, 2)
+    print(f"tiros: {len(ev)} intentos; ahora busco al tirador de cada uno", flush=True)
+    t1 = time.time()
+    try:
+        tiradores(a.video, aros, ev, fps, a.desde, a.lentes)
+    except Exception as ex:
+        print("tiros: no pude ubicar a los tiradores:", ex, flush=True)
+    print(f"tiros: tiradores ubicados en {sum('tirador_xy' in e for e in ev)} de {len(ev)} ({(time.time()-t1)/60:.0f} min)", flush=True)
+    for e in ev:
+        e["t"] = round(e["t"] + a.desde, 2); e.pop("_k", None); e.pop("_atras", None)
     json.dump({"version": 1, "fps": fps, "aros": aros, "tiros": ev}, open(a.out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     conv = sum(e["convertido"] for e in ev)
     print(f"tiros detectados: {len(ev)} ({conv} convertidos)", flush=True)
