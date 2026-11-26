@@ -2,14 +2,14 @@
 
 A 10 cuadros por segundo: detecta personas en cada lente, mide el color de la camiseta (restando el fondo),
 las ubica en la cancha con la calibración de las lentes y, 2 veces por segundo, lee el número de camiseta.
-Guarda el avance cada 200 cuadros y, si se corta, retoma donde quedó.
+Guarda el avance cada 200 cuadros (avance.jsonl) y, si se corta, retoma donde quedó.
 
 Uso:
   python veo_raw.py --video panoramica_original.mp4 --out trabajo/ --lentes calib_lentes_mitre.json
          [--modelo yolo11s.pt] [--lector lector_camisetas.pt --parseq-dir carpeta_parseq]
 Salida en trabajo/: dets.json (cajas, posición en cancha y lente), feats.json (color), lecturas.json (números)
 """
-import argparse, json, os, re, subprocess, sys, time, numpy as np, cv2
+import argparse, json, os, queue, re, subprocess, sys, threading, time, numpy as np, cv2
 from lentes import Lentes, LENTES, LW, LH
 
 FPS = 10.0
@@ -68,13 +68,16 @@ class Lector:
         return out
 
 
-def color_feats(lab, diff, bx, SC):
+def color_feats(lab, bg, bx, SC):
+    """lab: imagen LAB (uint8) de la lente a escala SC; bg: fondo LAB (int16) de la misma lente."""
     fe = []
     for (x1, y1, x2, y2) in bx:
         X1, Y1, X2, Y2 = int(x1 * SC), int(y1 * SC), int(x2 * SC), int(y2 * SC)
         hh = Y2 - Y1; ty1, ty2 = Y1 + int(0.12 * hh), Y1 + int(0.62 * hh)
-        sub = lab[max(ty1, 0):max(ty2, ty1 + 1), max(X1, 0):max(X2, X1 + 1)].reshape(-1, 3)
-        msk = diff[max(ty1, 0):max(ty2, ty1 + 1), max(X1, 0):max(X2, X1 + 1)].reshape(-1) > 45
+        sl = (slice(max(ty1, 0), max(ty2, ty1 + 1)), slice(max(X1, 0), max(X2, X1 + 1)))
+        sub = lab[sl].astype(np.int16)
+        msk = (np.abs(sub - bg[sl]).sum(-1) > 45).reshape(-1)
+        sub = sub.reshape(-1, 3)
         px = sub[msk]
         if len(px) < 15:
             fe.append([0, 0, 0, 0, 0, 0, 0, int(msk.sum())]); continue
@@ -117,33 +120,79 @@ def main():
     if lector is None: print("ATENCIÓN: sin lector de camisetas; solo detección y posiciones.", flush=True)
 
     dp, fp, rp = (os.path.join(a.out, n) for n in ("dets.json", "feats.json", "lecturas.json"))
-    dets = json.load(open(dp)) if os.path.exists(dp) else []
-    feats = json.load(open(fp)) if os.path.exists(fp) else []
-    reads = json.load(open(rp)) if os.path.exists(rp) else []
+    av = os.path.join(a.out, "avance.jsonl")
+    dets, feats, reads = [], [], []
+    if os.path.exists(av):
+        for line in open(av, encoding="utf-8"):
+            try: c = json.loads(line)
+            except ValueError: break          # última línea cortada a la mitad
+            if c["desde"] != len(dets): break
+            dets += c["d"]; feats += c["f"]; reads += c["r"]
+    elif os.path.exists(dp) and not os.path.exists(os.path.join(a.out, "deteccion_completa.txt")):
+        dets = json.load(open(dp)); feats = json.load(open(fp)) if os.path.exists(fp) else []
+        reads = json.load(open(rp)) if os.path.exists(rp) else []   # avance guardado por la versión anterior
     n = min(len(dets), len(feats)); dets, feats = dets[:n], feats[:n]
     reads = [r for r in reads if r[0] < n]
+    with open(av, "w", encoding="utf-8") as f:   # reescribe el avance limpio
+        if n: f.write(json.dumps({"desde": 0, "d": dets, "f": feats, "r": reads}) + "\n")
+    guardado = [n, len(reads)]
+
+    def guardar():
+        d0, r0 = guardado
+        with open(av, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"desde": d0, "d": dets[d0:], "f": feats[d0:], "r": reads[r0:]}) + "\n")
+        guardado[:] = [len(dets), len(reads)]
     total = int((dur - a.desde) * FPS)
     if n >= total:
         print("detección ya completa", flush=True); return
     start_t = a.desde + n / FPS
     base = ["ffmpeg", "-loglevel", "error"]
     tail = ["-ss", f"{start_t:.3f}", "-i", a.video, "-t", f"{dur - start_t:.3f}", "-vf", f"fps={FPS}", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    p = subprocess.Popen(base + ["-hwaccel", "cuda"] + tail, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10 ** 8)
+    p = subprocess.Popen(base + ["-hwaccel", "cuda"] + tail, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
     fsz = W * H * 3
-    first = p.stdout.read(fsz)
-    if len(first) < fsz:   # sin decodificación por placa de video: usar el procesador
-        p.kill(); p = subprocess.Popen(base + tail, stdout=subprocess.PIPE, bufsize=10 ** 8); first = p.stdout.read(fsz)
+
+    def leer_cuadro():
+        buf = bytearray(fsz); mv = memoryview(buf); k = 0
+        while k < fsz:
+            r = p.stdout.readinto(mv[k:])
+            if not r: return None
+            k += r
+        return buf
+
+    first = leer_cuadro()
+    hw = first is not None
+    if not hw:   # sin decodificación por placa de video: usar el procesador
+        p.kill(); p = subprocess.Popen(base + tail, stdout=subprocess.PIPE, bufsize=0); first = leer_cuadro()
+    print("decodificación de video:", "placa de video" if hw else "procesador", flush=True)
+    cola = queue.Queue(maxsize=8)
+
+    def lector_video():   # decodifica en paralelo mientras la placa detecta
+        fr = first
+        while fr is not None:
+            cola.put(np.frombuffer(fr, np.uint8).reshape(H, W, 3)); fr = leer_cuadro()
+        cola.put(None)
+    threading.Thread(target=lector_video, daemon=True).start()
+
+    from ultralytics.cfg import DEFAULT_CFG_DICT
+    prec = {"quantize": 16} if "quantize" in DEFAULT_CFG_DICT else {"half": True}
+    if dev != "cuda": prec = {}
+    try: torch.backends.cudnn.benchmark = True
+    except Exception: pass
     t0 = time.time(); done0 = n; batch = []
+    T = dict(video=0.0, deteccion=0.0, posicion=0.0, numeros=0.0, guardado=0.0)
     OCR_CADA = 5   # cada 5 cuadros procesados = 2 por segundo
 
     def flush(batch):
         imgs = []
         for fr in batch: imgs += [fr[:LH], fr[LH:]]
-        res = model.predict(imgs, imgsz=a.imgsz, classes=[0], conf=0.2, verbose=False, half=(dev == "cuda"))
+        tt = time.time()
+        res = model.predict(imgs, imgsz=a.imgsz, classes=[0], conf=0.2, verbose=False, **prec)
+        T["deteccion"] += time.time() - tt
         for k, fr in enumerate(batch):
+            tt = time.time()
             fidx = len(dets)
             small = cv2.resize(fr, (int(W * SC), int(H * SC)))
-            lab_all = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.int16)
+            lab_all = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
             B, XYs, Ls, F = [], [], [], []
             for li, lente in enumerate(LENTES):
                 r = res[2 * k + li]
@@ -152,8 +201,7 @@ def main():
                 foot = np.c_[(bx[:, 0] + bx[:, 2]) / 2, bx[:, 3]]
                 XY = LEN.a_cancha(lente, foot)
                 lab = lab_all[:int(LH * SC)] if li == 0 else lab_all[int(LH * SC):]
-                diff = np.abs(lab - bgL[lente]).sum(2)
-                fe = color_feats(lab, diff, bx, SC)
+                fe = color_feats(lab, bgL[lente], bx, SC)
                 for b, c, xy, f_ in zip(bx, cf, XY, fe):
                     if not (-2.5 < xy[0] < 30.5 and -2.5 < xy[1] < 17.5): continue
                     B.append([*map(float, b), float(c)]); XYs.append(xy); Ls.append(li); F.append(f_)
@@ -166,6 +214,7 @@ def main():
                         keep.remove(j if hi >= hj else i)
             B = [B[i] for i in keep]; XYs = [XYs[i] for i in keep]; Ls = [Ls[i] for i in keep]; F = [F[i] for i in keep]
             dets.append({"f": fidx, "b": np.round(B, 1).tolist(), "xy": np.round(XYs, 3).tolist(), "l": Ls}); feats.append(F)
+            T["posicion"] += time.time() - tt; tt = time.time()
             if lector is not None and fidx % OCR_CADA == 0 and B:
                 crops, ids = [], []
                 for i, (b, li) in enumerate(zip(B, Ls)):
@@ -176,24 +225,26 @@ def main():
                     if c.size: crops.append(c); ids.append(i)
                 for i, (num, sc) in zip(ids, lector.leer(crops)):
                     if num is not None and sc >= 0.5: reads.append([fidx, i, num, round(sc, 3)])
+            T["numeros"] += time.time() - tt
 
-    frames = [first]
-    while len(dets) < total:
-        if frames:
-            batch.append(np.frombuffer(frames.pop(), np.uint8).reshape(H, W, 3))
-        else:
-            b = p.stdout.read(fsz)
-            if len(b) < fsz: break
-            batch.append(np.frombuffer(b, np.uint8).reshape(H, W, 3))
+    while len(dets) + len(batch) < total:
+        tt = time.time(); fr = cola.get(); T["video"] += time.time() - tt
+        if fr is None: break
+        batch.append(fr)
         if len(batch) == a.lote:
             flush(batch); batch = []
             if len(dets) % 200 < a.lote:
-                json.dump(dets, open(dp, "w")); json.dump(feats, open(fp, "w")); json.dump(reads, open(rp, "w"))
+                tt = time.time(); guardar(); T["guardado"] += time.time() - tt
                 el = time.time() - t0; hechos = len(dets) - done0
-                print(f"{len(dets)}/{total} cuadros · {hechos/el:.1f} cuadros/s · {len(reads)} números leídos · faltan ~{(total-len(dets))/max(hechos/el,1e-6)/60:.0f} min", flush=True)
+                reparto = " ".join(f"{k} {v / hechos * 1000:.0f}" for k, v in T.items())
+                print(f"{len(dets)}/{total} cuadros · {hechos/el:.1f} cuadros/s · {len(reads)} números leídos · faltan ~{(total-len(dets))/max(hechos/el,1e-6)/60:.0f} min"
+                      f" · ms por cuadro: {reparto}", flush=True)
     if batch: flush(batch)
+    p.kill()
     json.dump(dets, open(dp, "w")); json.dump(feats, open(fp, "w")); json.dump(reads, open(rp, "w"))
     open(os.path.join(a.out, "deteccion_completa.txt"), "w").write(str(len(dets)))
+    try: os.remove(av)
+    except OSError: pass
     print(f"detección completa: {len(dets)} cuadros, {len(reads)} números leídos", flush=True)
 
 

@@ -127,7 +127,7 @@ def run(cmd, log):
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         p = subprocess.Popen(cmd, cwd=PROC, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         for line in p.stdout:
-            print("   ", line.rstrip()); lf.write(line)
+            print("   ", line.rstrip()); lf.write(line); lf.flush()
         return p.wait()
 
 
