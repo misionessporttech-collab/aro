@@ -362,6 +362,33 @@ def ident_quality(tracks, evs, knots, nF, seeds=4, frac=0.3):
 
 
 # ---------------------------------------------------------------- métricas por recorrido
+def shots_from(path, knots, game):
+    """Tiros detectados en la panorámica original (tiros.py), en tiempo del video del partido y con equipo según el aro."""
+    j = json.load(open(path, encoding="utf-8")); out = []
+    for s in j["tiros"]:
+        tv = s["t"] + offset_at(knots, s["t"])
+        team = "us" if (s["aro"] == "derecho") == attack_right(game, tv) else "opp"
+        out.append({"t": round(tv, 1), "aro": s["aro"], "team": team, "made": bool(s["convertido"]), "rebote": bool(s.get("rebote"))})
+    return out
+
+
+def shots_check(shots, game, win=(-1.5, 4.0)):
+    """Control contra las jugadas etiquetadas a mano: tiros (fg/ft) propios y puntos del rival."""
+    ours = [e for e in game["events"] if e["type"] in ("fg", "ft") and e.get("team") != "opp"]
+    opp = [e for e in game["events"] if e["type"] == "opp"]
+    used = set(); r = {"propios": len(ours), "encontrados": 0, "resultado_ok": 0, "rival_puntos": len(opp), "rival_encontrados": 0}
+    for e in ours:
+        c = [i for i, s in enumerate(shots) if i not in used and s["team"] == "us" and win[0] <= e["t"] - s["t"] <= win[1]]
+        if c:
+            i = min(c, key=lambda i: abs(e["t"] - shots[i]["t"] - 1)); used.add(i); r["encontrados"] += 1
+            r["resultado_ok"] += shots[i]["made"] == bool(e.get("d", {}).get("made"))
+    for e in opp:
+        c = [i for i, s in enumerate(shots) if i not in used and s["team"] == "opp" and s["made"] and -3 <= e["t"] - s["t"] <= 8]
+        if c: used.add(min(c, key=lambda i: abs(e["t"] - shots[i]["t"]))); r["rival_encontrados"] += 1
+    r["propios_sin_etiqueta"] = sum(1 for i, s in enumerate(shots) if s["team"] == "us" and i not in used)
+    return r
+
+
 def seg_metrics(t, knots, game):
     ks = np.array(sorted(t.pts)); P = np.array([t.pts[k] for k in ks])
     full = np.arange(ks[0], ks[-1] + 1)
@@ -401,6 +428,7 @@ def main():
     ap.add_argument("--video-len", type=float, default=0)
     ap.add_argument("--lecturas", default="", help="lecturas de camiseta (veo_raw.py)")
     ap.add_argument("--inicio-aprox", type=float, default=None, help="segundo aproximado del video del partido en que arranca la panorámica")
+    ap.add_argument("--tiros", default="", help="tiros detectados en la panorámica original (tiros.py)")
     a = ap.parse_args()
     game = json.load(open(a.partido))
     t0 = time.time()
@@ -464,9 +492,16 @@ def main():
             frames[f].append([int(x1), int(y1), int(x2), int(y2), TEAMC[t.team], lbl, round(float(t.pts[f][0]), 2), round(float(t.pts[f][1]), 2)])
     json.dump({"fps": FPS, "colores": [game["us"]["color"], game["opp"]["color"]], "frames": frames},
               open(os.path.join(os.path.dirname(os.path.abspath(a.dets)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
+    shots = shots_from(a.tiros, knots, game) if a.tiros and os.path.exists(a.tiros) else []
+    if shots:
+        sc = shots_check(shots, game)
+        print(f"tiros: {len(shots)} detectados ({sum(s['made'] for s in shots)} convertidos). Contra lo etiquetado: "
+              f"{sc['encontrados']} de {sc['propios']} tiros propios encontrados, resultado correcto en {sc['resultado_ok']}; "
+              f"{sc['rival_encontrados']} de {sc['rival_puntos']} anotaciones del rival; {sc['propios_sin_etiqueta']} tiros propios sin etiqueta")
     out = {"version": 1, "fuente": "original" if votes else "panoramica", "T0": round(T0, 2), "sync": [[round(k[0], 1), round(k[1], 2)] for k in knots],
            "calidad": q, "identidad": iq, "umbral_alta": HI_SPEED, "umbral_sprint": SPRINT, "segs": segs,
            "cubre": [round(T0, 1), round(T0 + nF / FPS, 1)]}
+    if shots: out["tiros"] = shots; out["tiros_control"] = sc
     json.dump(out, open(a.out, "w"), separators=(",", ":"))
     # resumen
     agg = {}

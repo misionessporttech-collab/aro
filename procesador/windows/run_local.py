@@ -187,8 +187,16 @@ def main():
             ver = os.path.getmtime(os.path.join(PROC, "procesar.py"))
             try: fuente = json.load(open(out, encoding="utf-8")).get("fuente", "") if os.path.exists(out) else ""
             except Exception: fuente = ""
+            falta_tiros = False
+            if original and fuente == "original":
+                lc = os.path.join(g, "calib_lentes.json")
+                if not os.path.exists(lc): lc = os.path.join(PROC, "calib_lentes_mitre.json")
+                try: falta_tiros = "tiros" not in json.load(open(out, encoding="utf-8")) and bool(json.load(open(lc, encoding="utf-8")).get("aros"))
+                except Exception: pass
             if original and fuente != "original":
                 print("  Hay un archivo original de Veo nuevo: rehago el análisis con él.")
+            elif falta_tiros:
+                print("  Falta la detección de tiros: la agrego.")
             elif os.path.exists(out) and os.path.getmtime(out) > max(os.path.getmtime(video), os.path.getmtime(resp), ver):
                 print("  Ya procesado (fisico.json está al día). Para rehacerlo, borrá fisico.json."); continue
             work = os.path.join(g, "trabajo_original" if original else "trabajo"); os.makedirs(work, exist_ok=True)
@@ -214,10 +222,23 @@ def main():
                     cmd = [PY, "pipeline.py", "--video", video, "--out", work, "--modelo", "yolo11s.pt", "--lote", str(lote)]
                 if run(cmd, log):
                     print("  ERROR en la detección: mirá proceso.log en la carpeta del partido."); continue
+            tiros = os.path.join(work, "tiros.json")
+            if original:
+                try: con_aros = bool(json.load(open(lentes, encoding="utf-8")).get("aros"))
+                except Exception: con_aros = False
+                if not con_aros:
+                    print("  (La calibración de esta cancha no marca los aros: salteo la detección de tiros.)")
+                elif os.path.exists(tiros) and os.path.getmtime(tiros) > max(os.path.getmtime(video), os.path.getmtime(os.path.join(PROC, "tiros.py"))):
+                    print("  Detección de tiros: ya está hecha, la reutilizo.")
+                else:
+                    print("  Detectar tiros al aro (unos 20-40 minutos).")
+                    if run([PY, "tiros.py", "--video", video, "--lentes", lentes, "--out", tiros], log):
+                        print("  No pude detectar los tiros (sigo con el resto): mirá proceso.log.")
             print("  Paso 2/2: seguimiento, identidad y métricas.")
             cmd = [PY, "procesar.py", "--partido", resp, "--dets", os.path.join(work, "dets.json"), "--feats", os.path.join(work, "feats.json"),
                    "--calib", os.path.join(work, "calib.json"), "--out", out]
             if original: cmd += ["--lecturas", os.path.join(work, "lecturas.json"), "--inicio-aprox", "0"]
+            if original and os.path.exists(tiros): cmd += ["--tiros", tiros]
             if run(cmd, log):
                 print("  ERROR en el análisis: mirá proceso.log en la carpeta del partido."); continue
             print(f"  LISTO en {(time.time() - t0) / 60:.0f} min: {out}")
