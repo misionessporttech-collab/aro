@@ -1009,7 +1009,7 @@ function renderTag() {
         </div>
       </div>
       <div class="card">
-        <div class="tabs"><button data-tab="ev" class="${TG.tab === "ev" ? "on" : ""}">Jugadas (${g.events.length})</button><button data-tab="set" class="${TG.tab === "set" ? "on" : ""}">Partido y plantel</button><button data-tab="keys" class="${TG.tab === "keys" ? "on" : ""}">Atajos</button></div>
+        <div class="tabs"><button data-tab="ev" class="${TG.tab === "ev" ? "on" : ""}">Jugadas (${g.events.length})</button>${sugShots(g).length ? `<button data-tab="sug" class="${TG.tab === "sug" ? "on" : ""}">Detectadas (${sugPending(g).length})</button>` : ""}<button data-tab="set" class="${TG.tab === "set" ? "on" : ""}">Partido y plantel</button><button data-tab="keys" class="${TG.tab === "keys" ? "on" : ""}">Atajos</button></div>
         <div id="tagTab"></div>
       </div>
     </div>
@@ -1154,6 +1154,58 @@ function deleteEvent(id) {
   pushUndo(g); g.events.splice(i, 1); if (TG.sel === id) TG.sel = null; if (TG.awaitLoc === id) TG.awaitLoc = null;
   touch(g); toast("Jugada borrada (Ctrl+Z para recuperar)"); renderTagTab(); renderEdit(); drawTagCourt(); updateTagClock();
 }
+/* ---------- tiros detectados automáticamente en la panorámica (procesador: tiros.py) ---------- */
+function sugShots(g) { return g && g.fisico && Array.isArray(g.fisico.tiros) ? g.fisico.tiros : []; }
+function sugCovered(g, s) {
+  return g.events.some(e => e.t - s.t >= -1.5 && e.t - s.t <= 4 && (s.team === "opp" ? e.type === "opp" : (e.type === "fg" || e.type === "ft") && e.team !== "opp"));
+}
+// del rival solo cuentan los puntos (Aro no registra sus tiros errados)
+function sugPending(g) { return sugShots(g).filter(s => !s.estado && !(s.team === "opp" && !s.made) && !sugCovered(g, s)); }
+function sugPts(s) { return s.tipo === "libre" ? 1 : s.tipo === "triple" ? 3 : 2; }
+function sugDesc(g, s) {
+  if (s.team === "opp") return `${g.opp.name} +${sugPts(s)}`;
+  if (s.tipo === "libre") return `Libre ${s.made ? "convertido" : "errado"}`;
+  return `${s.tipo === "triple" ? "Triple" : s.tipo === "doble" ? "Doble" : "Tiro"} ${s.made ? "convertido" : "errado"}`;
+}
+function sugToEvent(g, s, j) {
+  const type = s.team === "opp" ? "opp" : s.tipo === "libre" ? "ft" : "fg";
+  const e = { id: uid(), t: r2(s.t), type, team: s.team, j: type === "opp" ? null : (j || null), d: {}, x: null, y: null, auto: true };
+  if (type === "opp") e.d.pts = sugPts(s);
+  else if (type === "ft") { e.d.made = !!s.made; [e.x, e.y] = toP(CW - 5.8, RIM_Y).map(r2); }
+  else {
+    e.d.made = !!s.made; e.d.pts = s.tipo === "triple" ? 3 : 2;
+    if (s.x != null) {   // el análisis da la posición en la cancha del video; Aro guarda los tiros propios hacia la derecha
+      let X = s.x, Y = s.y; if (s.aro === "izquierdo") { X = CW - X; Y = CH - Y; }
+      [e.x, e.y] = toP(Math.min(CW, Math.max(0, X)), Math.min(CH, Math.max(0, Y))).map(r2); autoKind(e);
+    }
+  }
+  return e;
+}
+function renderSugTab(g, box) {
+  const all = sugShots(g), pend = sugPending(g);
+  const done = all.filter(s => s.estado === "agregada").length, cov = all.filter(s => !s.estado && sugCovered(g, s)).length;
+  const oppMiss = all.filter(s => s.team === "opp" && !s.made).length;
+  const roster = (g.roster || []).map(r => r.j);
+  const rows = pend.map(s => { const i = all.indexOf(s); return `<div class="ev ${TG.sug === i ? "sel" : ""}" data-sug="${i}">
+      <span class="t">${fmtT(s.t)}</span><span class="small muted">${periodLabel(periodIdx(g, s.t))}</span>
+      ${s.team === "opp" ? `<span style="font-weight:700">Rival</span>` : `<select class="inp sm" data-sug-j="${i}" title="Quién tiró" style="padding:2px 4px;width:auto"><option value="">Eq.</option>${roster.map(j => `<option value="${esc(j)}" ${String(s.j || "") === String(j) ? "selected" : ""}>#${esc(j)}</option>`).join("")}</select>`}
+      <span><span class="dot" style="background:${TYPE_COLOR[s.team === "opp" ? "opp" : s.tipo === "libre" ? "ft" : "fg"]}"></span> ${esc(sugDesc(g, s))}</span>
+      <span class="row" style="gap:4px"><button class="btn sm" data-sug-ok="${i}" title="Agregar a las jugadas">Agregar</button><button class="btn sm ghost" data-sug-no="${i}" title="Descartar">✕</button></span></div>`; }).join("");
+  box.innerHTML = `<div class="pad small" style="padding-bottom:6px">
+      Aro encontró estos tiros en el video panorámico. Tocá uno para verlo, corregí el resultado o quién tiró si hace falta y agregalo a las jugadas.
+      <span class="muted">${[done ? `${done} ya agregados` : "", cov ? `${cov} ya estaban etiquetados` : "", oppMiss ? `${oppMiss} errados del rival (no se registran)` : ""].filter(Boolean).join(" · ")}</span>
+      ${pend.length ? `<div class="row" style="margin-top:8px;gap:6px"><button class="btn sm" id="sugAll">Agregar todos (${pend.length})</button><button class="btn sm ghost" id="sugNone">Descartar todos</button></div>` : ""}
+    </div>${pend.length ? `<div class="evlist">${rows}</div>` : `<div class="empty small">No quedan tiros detectados por revisar.</div>`}`;
+  const add = (i, quiet) => { const s = all[i]; const sel = $(`[data-sug-j="${i}"]`, box); const e = sugToEvent(g, s, sel ? sel.value : s.j); g.events.push(e); s.estado = "agregada"; s.ev = e.id; if (!quiet) { sortEvents(g); TG.sel = e.id; } };
+  $$("[data-sug]", box).forEach(r => r.onclick = ev => {
+    if (ev.target.closest("button,select")) return;
+    TG.sug = +r.dataset.sug; if (hasVideo()) seek(all[TG.sug].t - 2.5); renderTagTab();
+  });
+  $$("[data-sug-ok]", box).forEach(b => b.onclick = () => { pushUndo(g); add(+b.dataset.sugOk); touch(g); renderTag(); });
+  $$("[data-sug-no]", box).forEach(b => b.onclick = () => { all[+b.dataset.sugNo].estado = "descartada"; touch(g); renderTag(); });
+  const A = $("#sugAll", box); if (A) A.onclick = async () => { if (!(await confirmBox(`Se agregan ${pend.length} jugadas detectadas automáticamente. Después podés corregir o borrar cualquiera.`, "Agregar", false))) return; pushUndo(g); pend.forEach(s => add(all.indexOf(s), true)); sortEvents(g); touch(g); toast(`${pend.length} jugadas agregadas`); renderTag(); };
+  const N = $("#sugNone", box); if (N) N.onclick = async () => { if (!(await confirmBox("Se descartan todos los tiros detectados que quedan por revisar.", "Descartar"))) return; pend.forEach(s => s.estado = "descartada"); touch(g); renderTag(); };
+}
 function renderTagTab() {
   const g = cur(), box = $("#tagTab"); if (!box) return;
   const tb = $(".tabs [data-tab='ev']"); if (tb) tb.textContent = `Jugadas (${g.events.length})`;
@@ -1173,6 +1225,8 @@ function renderTagTab() {
     });
     $$("[data-del-ev]", box).forEach(b => b.onclick = () => deleteEvent(b.dataset.delEv));
     const sel = $(".ev.sel", box); if (sel) sel.scrollIntoView({ block: "nearest" });
+  } else if (TG.tab === "sug") {
+    renderSugTab(g, box);
   } else if (TG.tab === "set") {
     box.innerHTML = `<div class="pad grid" style="gap:14px">
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
