@@ -1183,8 +1183,9 @@ function sugToEvent(g, s, j) {
 }
 function renderSugTab(g, box) {
   const all = sugShots(g), pend = sugPending(g);
-  const done = all.filter(s => s.estado === "agregada").length, cov = all.filter(s => !s.estado && sugCovered(g, s)).length;
-  const oppMiss = all.filter(s => s.team === "opp" && !s.made).length;
+  const game = all.filter(s => !s.calentamiento), warm = all.length - game.length;
+  const done = game.filter(s => s.estado === "agregada").length, cov = game.filter(s => !s.estado && sugCovered(g, s)).length;
+  const oppMiss = game.filter(s => s.team === "opp" && !s.made).length;
   const roster = (g.roster || []).map(r => r.j);
   const rows = pend.map(s => { const i = all.indexOf(s); return `<div class="ev ${TG.sug === i ? "sel" : ""}" data-sug="${i}">
       <span class="t">${fmtT(s.t)}</span><span class="small muted">${periodLabel(periodIdx(g, s.t))}</span>
@@ -1193,7 +1194,7 @@ function renderSugTab(g, box) {
       <span class="row" style="gap:4px"><button class="btn sm" data-sug-ok="${i}" title="Agregar a las jugadas">Agregar</button><button class="btn sm ghost" data-sug-no="${i}" title="Descartar">✕</button></span></div>`; }).join("");
   box.innerHTML = `<div class="pad small" style="padding-bottom:6px">
       Aro encontró estos tiros en el video panorámico. Tocá uno para verlo, corregí el resultado o quién tiró si hace falta y agregalo a las jugadas.
-      <span class="muted">${[done ? `${done} ya agregados` : "", cov ? `${cov} ya estaban etiquetados` : "", oppMiss ? `${oppMiss} errados del rival (no se registran)` : ""].filter(Boolean).join(" · ")}</span>
+      <span class="muted">${[done ? `${done} ya agregados` : "", cov ? `${cov} ya estaban etiquetados` : "", oppMiss ? `${oppMiss} errados del rival (no se registran)` : "", warm ? `${warm} de entrada en calor (no cuentan)` : ""].filter(Boolean).join(" · ")}</span>
       ${pend.length ? `<div class="row" style="margin-top:8px;gap:6px"><button class="btn sm" id="sugAll">Agregar todos (${pend.length})</button><button class="btn sm ghost" id="sugNone">Descartar todos</button></div>` : ""}
     </div>${pend.length ? `<div class="evlist">${rows}</div>` : `<div class="empty small">No quedan tiros detectados por revisar.</div>`}`;
   const add = (i, quiet) => { const s = all[i]; const sel = $(`[data-sug-j="${i}"]`, box); const e = sugToEvent(g, s, sel ? sel.value : s.j); g.events.push(e); s.estado = "agregada"; s.ev = e.id; if (!quiet) { sortEvents(g); TG.sel = e.id; } };
