@@ -239,6 +239,7 @@ def main():
                    "--calib", os.path.join(work, "calib.json"), "--out", out]
             if original: cmd += ["--lecturas", os.path.join(work, "lecturas.json"), "--inicio-aprox", "0"]
             if original and os.path.exists(tiros): cmd += ["--tiros", tiros]
+            if original: cmd += ["--lentes", lentes]
             if run(cmd, log):
                 print("  ERROR en el análisis: mirá proceso.log en la carpeta del partido."); continue
             print(f"  LISTO en {(time.time() - t0) / 60:.0f} min: {out}")

@@ -50,7 +50,19 @@ def _read_json(path):
     except ImportError:
         return json.load(open(path))
 
-def load(dets_path, feats_path, calib_path):
+def floor_masks(lentes_path):
+    """Polígono del piso de juego de cada lente (calibración de la cancha): deja afuera tribunas y bancos."""
+    try: piso = json.load(open(lentes_path, encoding="utf-8")).get("piso")
+    except Exception: return None
+    if not piso: return None
+    import cv2
+    out = {}
+    for k, n in enumerate(("arriba", "abajo")):
+        M = np.zeros((1024, 2048), np.uint8); cv2.fillPoly(M, [np.array(piso[n], np.int32)], 1); out[k] = M > 0
+    return out
+
+
+def load(dets_path, feats_path, calib_path, masks=None):
     """Carga detecciones y colores por partes para no agotar la memoria con partidos completos."""
     import gc
     dets = _read_json(dets_path)
@@ -77,10 +89,22 @@ def load(dets_path, feats_path, calib_path):
         M = Mapper(json.load(open(calib_path))["params"])
         XY = M.to_court(R[:, 2:4]); lens = np.zeros(len(R), np.int8)
     ok = (XY[:, 0] > -1.0) & (XY[:, 0] < CW + 1.0) & (XY[:, 1] > -0.35) & (XY[:, 1] < CH + 0.8) & (R[:, 15] >= 15)
+    if masks is not None and has_xy:   # pies dentro del piso de juego de su lente
+        fx = np.clip(R[:, 2].astype(int), 0, 2047); fy = np.clip(R[:, 3].astype(int), 0, 1023)
+        inside = np.zeros(len(R), bool)
+        for k, M in masks.items():
+            m = lens == k; inside[m] = M[fy[m], fx[m]]
+        ok &= inside
     orig = np.c_[fidx, sub][ok]
     return R[ok], XY[ok], nF, orig, lens[ok]
 
-def classify(R):
+def classify(R, lens=None):
+    """Equipo por color de camiseta. Con el original de Veo, cada lente tiene su propia luz: se agrupa por lente."""
+    if lens is not None and len(np.unique(lens)) > 1:
+        out = np.empty(len(R), dtype=object)
+        for k in np.unique(lens):
+            m = lens == k; out[m] = classify(R[m])
+        return out.astype(str)
     F = R[:, 8:15]  # gold, white, red, dark, blue, medB, medL
     feat = np.c_[F[:, 0] * 2, F[:, 1] * 2, F[:, 2] * 3, F[:, 3] * 2, F[:, 4], F[:, 5] / 25, F[:, 6] / 120]
     km = KMeans(3, n_init=10, random_state=0).fit(feat)
@@ -371,10 +395,14 @@ def _iou(a, b):
     return i / u if u > 0 else 0.0
 
 
-def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None, ident=None):
+def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None, ident=None, lentes=None):
     """Tiros detectados en la panorámica original (tiros.py), en tiempo del video del partido, con equipo según el aro
     y, si se pudo seguir la pelota hasta las manos, el tirador (recorrido -> camiseta) y la distancia al aro."""
     j = json.load(open(path, encoding="utf-8")); out = []
+    aros = j.get("aros") or []
+    if lentes and os.path.exists(lentes):   # umbrales actuales de la cancha (pueden ser más nuevos que la detección)
+        aros = json.load(open(lentes, encoding="utf-8")).get("aros") or aros
+    umb = {x["nombre"]: x["umbral_red"] for x in aros if "umbral_red" in x}
     owner, rows_f = {}, {}
     if tracks is not None and orig is not None:
         for t in tracks:
@@ -384,7 +412,8 @@ def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None,
     for s in j["tiros"]:
         tv = s["t"] + offset_at(knots, s["t"])
         team = "us" if (s["aro"] == "derecho") == attack_right(game, tv) else "opp"
-        o = {"t": round(tv, 1), "aro": s["aro"], "team": team, "made": bool(s["convertido"]), "rebote": bool(s.get("rebote"))}
+        made = s["red"] >= umb[s["aro"]] if s["aro"] in umb and "red" in s else bool(s["convertido"])
+        o = {"t": round(tv, 1), "aro": s["aro"], "team": team, "made": bool(made), "rebote": bool(s.get("rebote"))}
         tb = s.get("tirador_box")
         if tb and owner:
             f0 = int(round(s.get("tirador_t", s["suelta_t"]) * FPS)); L = 0 if s.get("lente") == "arriba" else 1; best = None
@@ -506,22 +535,24 @@ def main():
     ap.add_argument("--lecturas", default="", help="lecturas de camiseta (veo_raw.py)")
     ap.add_argument("--inicio-aprox", type=float, default=None, help="segundo aproximado del video del partido en que arranca la panorámica")
     ap.add_argument("--tiros", default="", help="tiros detectados en la panorámica original (tiros.py)")
+    ap.add_argument("--lentes", default="", help="calibración de lentes de la cancha (piso de juego de cada lente)")
     a = ap.parse_args()
     game = json.load(open(a.partido))
     t0 = time.time()
     cache = os.path.join(os.path.dirname(os.path.abspath(a.dets)), "seguimiento.pkl")
     evs = aro_events(game)
     vlen = a.video_len or (max(e["t"] for e in game["events"]) + 60)
-    deps = [a.dets, a.feats] + ([a.calib] if os.path.exists(a.calib) else [])
+    deps = [a.dets, a.feats] + [p for p in (a.calib, a.lentes) if p and os.path.exists(p)]
     if os.path.exists(cache) and os.path.getmtime(cache) > max(os.path.getmtime(x) for x in deps) and a.inicio_aprox is None:
         C = pickle.load(open(cache, "rb"))
         boxes, tracks, nF, T0, knots, q = C["boxes"], C["tracks"], C["nF"], C["T0"], C["knots"], C["q"]
         orig, lens = C.get("orig"), C.get("lens")
         print("uso el seguimiento ya calculado (seguimiento.pkl); para rehacerlo, borralo")
     else:
-        R, XY, nF, orig, lens = load(a.dets, a.feats, a.calib)
-        print(f"detecciones cargadas ({time.time() - t0:.0f} s)")
-        team = classify(R)
+        masks = floor_masks(a.lentes) if a.lentes else None
+        R, XY, nF, orig, lens = load(a.dets, a.feats, a.calib, masks)
+        print(f"detecciones cargadas ({time.time() - t0:.0f} s)" + (" · solo dentro del piso de juego" if masks else ""))
+        team = classify(R, lens if masks else None)
         print("detecciones por cuadro:", {k: round(float((team == k).sum()) / nF, 1) for k in ("us", "opp", "ref")})
         tracks, by_f = track(R, XY, team, nF)
         print("recorridos:", {k: sum(t.team == k for t in tracks) for k in ("us", "opp", "ref")}, f"({time.time() - t0:.0f} s)")
@@ -569,7 +600,7 @@ def main():
             frames[f].append([int(x1), int(y1), int(x2), int(y2), TEAMC[t.team], lbl, round(float(t.pts[f][0]), 2), round(float(t.pts[f][1]), 2)])
     json.dump({"fps": FPS, "colores": [game["us"]["color"], game["opp"]["color"]], "frames": frames},
               open(os.path.join(os.path.dirname(os.path.abspath(a.dets)), "etiquetas.json"), "w"), separators=(",", ":"), ensure_ascii=False)
-    shots = shots_from(a.tiros, knots, game, tracks, boxes, orig, lens, ident) if a.tiros and os.path.exists(a.tiros) else []
+    shots = shots_from(a.tiros, knots, game, tracks, boxes, orig, lens, ident, a.lentes) if a.tiros and os.path.exists(a.tiros) else []
     if shots:
         sc = shots_check(shots, game)
         print(f"tiros: {len(shots)} detectados ({sum(s['made'] for s in shots)} convertidos). Contra lo etiquetado: "

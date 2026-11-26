@@ -83,7 +83,9 @@ def seguir(F, k, f0, p0, paso, maxlen=45, maxgap=5, dist=32):
     return pts
 
 
-def detectar(F, fps, nombres):
+def detectar(F, fps, nombres, umbrales=None):
+    """Convertido = la red se sacude fuerte (umbral propio de cada aro; el rebote no decide: la red también tira la pelota para arriba)."""
+    umbrales = umbrales or [260] * len(nombres)
     ev = []
     for k, nombre in enumerate(nombres):
         last = -999
@@ -101,7 +103,7 @@ def detectar(F, fps, nombres):
             fwd = seguir(F, k, f, c, +1, maxlen=40)
             rebote = any(p[1] < c[1] - 8 and g - f <= 30 for g, p in fwd[1:])
             red = max(F[g][k][1] for g in range(f, min(len(F), f + 30)))
-            ev.append({"t": round(f / fps, 2), "aro": nombre, "convertido": (not rebote) and red >= 300,
+            ev.append({"t": round(f / fps, 2), "aro": nombre, "convertido": red >= umbrales[k],
                        "rebote": rebote, "red": red, "desde": [round(xs[-1]), round(ys[-1])], "llegada": [round(c[0]), round(c[1])],
                        "vuelo": round((back[0][0] - back[-1][0]) / fps, 2), "_k": k,
                        "_atras": [[g, round(p[0], 1), round(p[1], 1)] for g, p in back]})
@@ -258,7 +260,7 @@ def main():
             el = time.time() - t0
             print(f"tiros: {len(F)}/{total} cuadros · {len(F)/el:.0f} cuadros/s · faltan ~{(total-len(F))/(len(F)/el)/60:.0f} min", flush=True)
     p.kill()
-    ev = detectar(F, fps, [x["nombre"] for x in aros])
+    ev = detectar(F, fps, [x["nombre"] for x in aros], [x.get("umbral_red", 260) for x in aros])
     print(f"tiros: {len(ev)} intentos; ahora busco al tirador de cada uno", flush=True)
     t1 = time.time()
     try:
