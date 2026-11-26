@@ -411,7 +411,20 @@ def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None,
         elif "dist" in o:
             o["tipo"] = "triple" if o["dist"] > 6.6 else "doble"
         out.append(o)
-    return out
+    return warmup_filter(out, game)
+
+
+def warmup_filter(shots, game):
+    """Fuera del partido (antes del inicio, después del final) no cuentan; en los entretiempos hay entrada en calor:
+    varias pelotas a la vez (tiros en los dos aros casi juntos) o muchos tiros seguidos."""
+    t_ini = (game.get("start") or 0) - 5; t_fin = (game.get("qEnd") or [1e9])[-1] + 5 if len(game.get("qEnd") or []) >= 4 else 1e9
+    shots = [s for s in shots if t_ini <= s["t"] <= t_fin]
+    T = np.array([s["t"] for s in shots]); A = np.array([s["aro"] for s in shots])
+    for i, s in enumerate(shots):
+        otro = np.any((np.abs(T - s["t"]) < 6) & (A != s["aro"]))
+        muchos = np.sum(np.abs(T - s["t"]) <= 30) >= 7
+        if otro or muchos: s["calentamiento"] = True
+    return shots
 
 
 def ft_setup(tracks, t_rel, aro, win=2.0):
@@ -433,6 +446,7 @@ def ft_setup(tracks, t_rel, aro, win=2.0):
 
 def shots_check(shots, game, win=(-1.5, 4.0)):
     """Control contra las jugadas etiquetadas a mano: tiros (fg/ft) propios y puntos del rival."""
+    shots = [s for s in shots if not s.get("calentamiento")]
     ours = [e for e in game["events"] if e["type"] in ("fg", "ft") and e.get("team") != "opp"]
     opp = [e for e in game["events"] if e["type"] == "opp"]
     used = set(); r = {"propios": len(ours), "encontrados": 0, "resultado_ok": 0, "rival_puntos": len(opp), "rival_encontrados": 0}

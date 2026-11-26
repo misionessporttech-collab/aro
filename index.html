@@ -1160,7 +1160,7 @@ function sugCovered(g, s) {
   return g.events.some(e => e.t - s.t >= -1.5 && e.t - s.t <= 4 && (s.team === "opp" ? e.type === "opp" : (e.type === "fg" || e.type === "ft") && e.team !== "opp"));
 }
 // del rival solo cuentan los puntos (Aro no registra sus tiros errados)
-function sugPending(g) { return sugShots(g).filter(s => !s.estado && !(s.team === "opp" && !s.made) && !sugCovered(g, s)); }
+function sugPending(g) { return sugShots(g).filter(s => !s.estado && !s.calentamiento && !(s.team === "opp" && !s.made) && !sugCovered(g, s)); }
 function sugPts(s) { return s.tipo === "libre" ? 1 : s.tipo === "triple" ? 3 : 2; }
 function sugDesc(g, s) {
   if (s.team === "opp") return `${g.opp.name} +${sugPts(s)}`;
