@@ -402,11 +402,33 @@ def shots_from(path, knots, game, tracks=None, boxes=None, orig=None, lens=None,
         if "dist" not in o and s.get("tirador_xy"):
             X, Y = s["tirador_xy"]; hx, hy = HOOP_XY[s["aro"]]
             o.update({"x": X, "y": Y, "dist": round(float(np.hypot(X - hx, Y - hy)), 2)})
-        if "dist" in o:
-            libre = abs(o["dist"] - 4.225) < 0.8 and abs(o["y"] - CH / 2) < 1.0
-            o["tipo"] = "libre" if libre else ("triple" if o["dist"] > 6.6 else "doble")
+        # libre: jugadores quietos y uno parado en la línea de libres (si no se encontró al tirador, ese es el tirador)
+        st = ft_setup(tracks, s.get("suelta_t", s["t"] - 1.0), s["aro"]) if tracks is not None else None
+        if st and ("dist" not in o or abs(o["dist"] - 4.225) < 1.2):
+            t, X, Y = st
+            o.update({"tipo": "libre", "x": round(X, 2), "y": round(Y, 2), "dist": 4.23})
+            if t.team == "us" and not o.get("j"): o["j"] = ident.get(t.id)
+        elif "dist" in o:
+            o["tipo"] = "triple" if o["dist"] > 6.6 else "doble"
         out.append(o)
     return out
+
+
+def ft_setup(tracks, t_rel, aro, win=2.0):
+    """¿Formación de tiro libre al momento del lanzamiento? Devuelve (recorrido, x, y) del que está en la línea, o None."""
+    fx = 5.8 if aro == "izquierdo" else CW - 5.8
+    f1 = int(round(t_rel * FPS)); f0 = f1 - int(win * FPS)
+    speeds, at_line = [], []
+    for t in tracks:
+        if t.team == "ref": continue
+        a = next((t.pts[f0 + d] for d in (0, 1, -1, 2, -2) if f0 + d in t.pts), None)
+        b = next((t.pts[f1 + d] for d in (0, -1, 1, -2, 2) if f1 + d in t.pts), None)
+        if a is None or b is None: continue
+        speeds.append(np.hypot(*(b - a)) / win)
+        if np.hypot(b[0] - fx, b[1] - CH / 2) < 0.9: at_line.append((np.hypot(b[0] - fx, b[1] - CH / 2), t, b))
+    if len(speeds) < 4 or not at_line or np.median(speeds) > 0.6: return None
+    _, t, b = min(at_line, key=lambda z: z[0])
+    return t, float(b[0]), float(b[1])
 
 
 def shots_check(shots, game, win=(-1.5, 4.0)):
